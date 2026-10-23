@@ -1,0 +1,25 @@
+# 내부 관리 문서 (로컬 전용)
+CLAUDE.md
+HISTORY.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ROS 2 (colcon)
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# AI 학습 데이터 (용량이 커서 제외, 폴더 구조만 유지)
+04_unit/08_ai_vision/dataset/*
+!04_unit/08_ai_vision/dataset/.gitkeep
+
+# 에디터·OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
