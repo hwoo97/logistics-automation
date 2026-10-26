@@ -29,7 +29,7 @@
 
 ### 준비 (첫 3일, 위험 확인 항목 먼저)
 - [ ] Pi 5에 Ubuntu 24.04 + ROS 2 Jazzy(`ros-base`) 설치 → `ros2 doctor` 정상 — A
-- [ ] **Camera Module 3 Wide**: libcamera + camera_ros → `ros2 topic hz /camera/image_raw` 확인 — A
+- [ ] **Camera Module 3 Wide**: libcamera + camera_ros → `ros2 topic hz /camera/image_raw` 확인 → [절차·스크립트](../03_setup/camera/README.md) — A
   - [ ] 막히면 2일 안에 USB 웹캠으로 전환 결정
 - [ ] lgpio 설치, LED 점등 시험 — A
 - [ ] I2C 활성화, `i2cdetect`에서 PCA9685(0x40) 확인 — A
