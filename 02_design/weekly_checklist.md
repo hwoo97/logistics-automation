@@ -29,10 +29,10 @@
 
 ### 준비 (첫 3일, 위험 확인 항목 먼저)
 - [ ] Pi 5에 Ubuntu 24.04 + ROS 2 Jazzy(`ros-base`) 설치 → `ros2 doctor` 정상 — A
-- [ ] **Camera Module 3 Wide**: libcamera + camera_ros → `ros2 topic hz /camera/image_raw` 확인 → [절차·스크립트](../03_setup/camera/README.md) — A
-  - [ ] 막히면 2일 안에 USB 웹캠으로 전환 결정
-- [ ] lgpio 설치, LED 점등 시험 — A
-- [ ] I2C 활성화, `i2cdetect`에서 PCA9685(0x40) 확인 — A
+- [x] **Camera Module 3 Wide**: libcamera + camera_ros → `ros2 topic hz /camera/image_raw` 확인 → [절차·스크립트](../03_setup/camera/README.md) — A
+  - [x] 막히면 2일 안에 USB 웹캠으로 전환 결정 (불필요 — 2026-10-26 통과)
+- [ ] lgpio 설치, LED 점등 시험 → [절차·스크립트](../03_setup/gpio_i2c/README.md) — A
+- [ ] I2C 활성화, `i2cdetect`에서 PCA9685(0x40) 확인, 팬틸트 채널·GPIO17(OE) 확인 → [절차·스크립트](../03_setup/gpio_i2c/README.md) — A
 - [ ] `ai-edge-litert` 설치, 예제 `.tflite` 추론 1회 — B
 - [ ] 블루투스 페어링(팀 노트북 ↔ Pi 5), RFCOMM 에코 시험 → [절차·스크립트](../03_setup/bluetooth/README.md) — C
 - [ ] `ros2_ws` 생성, 패키지 7개 골격 + `agv_interfaces` 빌드 — D
