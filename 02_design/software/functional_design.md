@@ -85,6 +85,8 @@
 | `/mission/command` | agv_interfaces/Command | bt_bridge → mission_node | 이벤트 | START n, STOP, RESUME, MANUAL, MOVE |
 | `/mission/status` | agv_interfaces/Status | mission_node → bt_bridge | 2Hz + 변화 시 | 상태, 작업 횟수, 화물, 목적지 |
 | `/safety/estop` | std_msgs/Bool | bt_bridge·mission → motor_node | 이벤트 | 비상 정지 래치 |
+| `/dev/wheels` | std_msgs/Float32MultiArray | bt_bridge → motor_node | 0.3초 반복 | 개발자 탭: L1~L4 듀티 (-1~1), 워치독 적용 |
+| `/dev/pantilt_angle` | std_msgs/Float32MultiArray | bt_bridge → pantilt_node | 이벤트 | 개발자 탭: [팬, 틸트] 각도 |
 
 ### 서비스 / 액션
 | 이름 | 종류 | 제공 | 요청 → 응답 |
@@ -235,7 +237,7 @@ def choose_branch(markers, target):          # markers: {"left": [...], "front":
   | JUNCTION | 분기점에서 갈래 마커 보기 | 약간 아래 (갈래 3개가 한 화면에) |
   | SIGN | 표지판·화물 인식 | 정면 |
 - 자세 변경 후 0.3초 안정화 대기
-- GPIO17이 PCA9685 OE로 확인되면 시작 시 LOW 출력
+- GPIO17: 제어 없이 서보 동작 확인(2026-10-26) → 필수 아님. 드라이버는 안전하게 시작 시 LOW 출력(OE라면 출력 활성, 아니면 영향 없음)
 
 ### F3 · 모터 (`motor_node`)
 - 입력 `/cmd_vel`(x: 선속도, z: 각속도) → 좌우 속도 = x ∓ z·k → 같은 쪽 바퀴 2개는 같은 값

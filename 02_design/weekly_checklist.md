@@ -32,16 +32,16 @@
 - [x] **Camera Module 3 Wide**: libcamera + camera_ros → `ros2 topic hz /camera/image_raw` 확인 → [절차·스크립트](../03_setup/camera/README.md) — A
   - [x] 막히면 2일 안에 USB 웹캠으로 전환 결정 (불필요 — 2026-10-26 통과)
 - [ ] lgpio 설치, LED 점등 시험 → [절차·스크립트](../03_setup/gpio_i2c/README.md) — A
-- [ ] I2C 활성화, `i2cdetect`에서 PCA9685(0x40) 확인, 팬틸트 채널·GPIO17(OE) 확인 → [절차·스크립트](../03_setup/gpio_i2c/README.md) — A
+- [x] I2C 활성화, `i2cdetect`에서 PCA9685(0x40) 확인, 서보 동작 확인 (팬틸트 채널 번호·GPIO17(OE) 기록 남음) → [절차·스크립트](../03_setup/gpio_i2c/README.md) — A
 - [ ] `ai-edge-litert` 설치, 예제 `.tflite` 추론 1회 — B
 - [ ] 블루투스 페어링(팀 노트북 ↔ Pi 5), RFCOMM 에코 시험 → [절차·스크립트](../03_setup/bluetooth/README.md) — C
 - [ ] `ros2_ws` 생성, 패키지 7개 골격 + `agv_interfaces` 빌드 — D
 - [ ] 브레드보드 배선(초음파 분압, LED 저항) → [배선도](hardware/wiring.md)의 S0 점검 순서 — A
 
 ### A · 차량·주행
-- [ ] 드라이버 4종(실제·가짜): 모터, 서보, 초음파, LED
-- [ ] hw 노드 4개: motor, pantilt, ultrasonic, led + 모터 워치독(0.5초)
-- [ ] `s0_hw.launch.py` 실행
+- [x] 드라이버 4종(실제·가짜): 모터, 서보, 초음파, LED (코드·pytest, Pi 실행 확인 남음)
+- [x] hw 노드 4개: motor, pantilt, ultrasonic, led + 모터 워치독(0.5초) (코드, Pi 실행 확인 남음)
+- [ ] `s0_hw.launch.py` 실행 → 노트북 앱 개발자 탭으로 S0 ([절차](../ros2_ws/README.md))
 - [ ] L1~L4가 어느 바퀴인지, 전진 방향 DIR 값 확인 → `params.yaml`의 `wheel_map`·`invert`
 - [ ] 팬틸트 자세 LINE·JUNCTION·SIGN 각도 확인
 
@@ -52,9 +52,9 @@
 - [ ] 카메라 토픽 저장 스크립트(학습 데이터 촬영용)
 
 ### C · 통신·앱
-- [ ] `agv_protocol` 메시지 생성·해석 + pytest (모든 명령·응답)
-- [ ] `agv_bt` 제어 채널: 연결, `PING/PONG`, 하트비트 1.5초, `STOP` → `/safety/estop`
-- [ ] 노트북 앱 화면 골격(연결·작업·상태·비상 정지)
+- [x] `agv_protocol` 메시지 생성·해석 + pytest (모든 명령·응답, DEV 포함 56개 통과)
+- [ ] `agv_bt` 제어 채널: 연결, `PING/PONG`, 하트비트 1.5초, `STOP` → `/safety/estop` (RfcommServer 완료, `bt_bridge_node` 남음)
+- [x] 노트북 앱 — 사용자 탭·개발자 탭, 가짜 차량으로 PC 시험 ([laptop_app](../laptop_app/README.md))
 
 ### D · 임무·통합
 - [ ] `agv_protocol/types.py` 공통 열거형 확정

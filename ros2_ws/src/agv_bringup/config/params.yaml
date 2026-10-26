@@ -1,0 +1,58 @@
+# 노드 파라미터 — 숫자는 초기값, 테스트 트랙 단계에서 보정 (functional_design.md 10절)
+# use_fake_hw 는 launch 인자로 덮어쓴다 (s0_hw.launch.py use_fake_hw:=true)
+
+motor_node:
+  ros__parameters:
+    duty_max: 0.75              # TT 모터 보호 (7.4V 배터리)
+    pwm_hz: 1000
+    wheel_map: [front_left, rear_left, front_right, rear_right]   # L1~L4가 어느 바퀴인지 — S0에서 확정
+    invert: [false, false, false, false]                          # L1~L4 극성 반전 — S0에서 확정
+    turn_gain: 1.0
+    watchdog_s: 0.5
+    gpio_chip: -1               # -1 = RP1 칩 자동 탐색
+
+pantilt_node:
+  ros__parameters:
+    pan_channel: 0              # 2026-10-26 확인
+    tilt_channel: 1
+    settle_s: 0.3
+    poses:                      # [팬, 틸트] 도 — S0·S6에서 보정
+      LINE: [90, 40]
+      JUNCTION: [90, 60]
+      SIGN: [90, 95]
+    i2c_bus: 1
+    address: 64                 # 0x40
+    oe_pin: 17                  # 제어 없이 동작 확인, 시작 시 LOW만 출력 (-1 = 사용 안 함)
+    gpio_chip: -1
+
+ultrasonic_node:
+  ros__parameters:
+    rate_hz: 15.0
+    median_window: 5
+    min_range: 0.02
+    max_range: 2.0
+    trig_pin: 5
+    echo_pin: 6
+    fake_distance: 1.0
+    gpio_chip: -1
+
+led_node:
+  ros__parameters:
+    red_pin: 16
+    green_pin: 26
+    gpio_chip: -1
+
+bt_bridge_node:
+  ros__parameters:
+    transport: rfcomm           # tcp 로 바꾸면 Wi-Fi/유선으로 노트북 앱 연결 시험 가능 (포트 tcp_port, 영상 +1)
+    tcp_port: 9000
+    standalone: true            # mission_node 작성 전: 브리지가 IDLE·MANUAL·ESTOP 직접 관리
+    video_fps: 5.0
+    video_size: [320, 240]
+    jpeg_quality: 50
+    camera_topic: /camera/image_raw
+
+camera:
+  ros__parameters:
+    width: 640
+    height: 480

@@ -28,3 +28,6 @@ rosbag2_*/
 .idea/
 .DS_Store
 Thumbs.db
+
+# 노트북 앱 개인 설정 (Pi 블루투스 주소)
+laptop_app/config.json

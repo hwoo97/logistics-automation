@@ -536,7 +536,10 @@ classDiagram
 | `App` | 설정(Pi 블루투스 주소) 읽기, 객체 생성·연결, tkinter 메인 루프 |
 | `BtClient` | 채널 1 연결, 수신 스레드(`parse_reply` → `on_reply` 콜백), 0.5초 PING 타이머, `send("START", 3)` |
 | `VideoReceiver` | 채널 2 수신 스레드 → `FrameReader.feed` → 큐 (최신 1장 유지) |
-| `MainWindow` | 연결 버튼, 작업 횟수 입력·시작, **비상 정지 버튼(크게, 스페이스바)**, 재개, 상태 표시 |
+| `MainWindow` | 연결 막대(연결 방식·주소·연결·RTT·**비상 정지(크게, 스페이스바)**) + 탭 2개, 수신 메시지를 탭에 분배 |
+| `UserTab` | 사용자 탭 — 작업 횟수 입력·시작, 재개, 상태·진행·화물·목적지, 사건·오류, 영상, `ManualPad` |
+| `DevTab` | 개발자 탭 — `DEV` 명령(LED·팬틸트·바퀴), 측정값(초음파 그래프·라인·Pi 상태·노드), 영상 FPS·사진 저장, 메시지 콘솔 |
+| `FakeVehicle` | 가짜 차량 — `RfcommServer`(TCP)로 작업 사이클·DEV·영상을 흉내 내 Pi 없이 앱 시험 |
 | `VideoView` | 큐에서 JPEG 꺼내 표시 + 현재 상태 문구 겹쳐 그리기 (30ms 주기) |
 | `ManualPad` | 방향 버튼·W/A/S/D → `MOVE v w`를 0.3초마다 반복, 키를 떼면 `MOVE 0 0` |
 

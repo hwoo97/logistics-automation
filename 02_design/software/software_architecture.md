@@ -56,7 +56,7 @@ logistics-automation/
 │  ├─ agv_hw/                       # 하드웨어 드라이버 + 노드
 │  │  └─ agv_hw/
 │  │     ├─ drivers/  base.py  motor.py  servo_pca9685.py  ultrasonic.py  led.py  fake.py
-│  │     ├─ filters.py
+│  │     ├─ logic.py                # MedianFilter, mix, wheel_speeds, led_output, Watchdog (순수)
 │  │     ├─ motor_node.py  pantilt_node.py  ultrasonic_node.py  led_node.py
 │  │
 │  ├─ agv_vision/                   # 영상 알고리즘 + 노드
@@ -70,17 +70,18 @@ logistics-automation/
 │  │     ├─ drive_node.py  mission_node.py
 │  │
 │  ├─ agv_bt/                       # 블루투스 브리지
-│  │  └─ agv_bt/  rfcomm_server.py  video_streamer.py  bt_bridge_node.py
+│  │  └─ agv_bt/  rfcomm_server.py  bridge_core.py  video_streamer.py  sysinfo.py  bt_bridge_node.py
 │  │
 │  └─ agv_bringup/                  # 실행 구성
 │     ├─ launch/  agv.launch.py  s0_hw.launch.py … s10_full.launch.py
 │     ├─ config/  params.yaml
 │     └─ models/  cargo.tflite  sign.tflite  labels_*.txt
 │
-├─ laptop_app/                      # 노트북 제어 앱
-│  ├─ main.py
+├─ laptop_app/                      # 노트북 제어 앱 (ROS 없음)
+│  ├─ main.py  _paths.py
 │  ├─ bt_client.py  video_receiver.py
-│  ├─ ui/  main_window.py  video_view.py  manual_pad.py
+│  ├─ fake_vehicle.py              # 가짜 차량 (Pi 없이 PC 시험, RfcommServer 재사용)
+│  ├─ ui/  main_window.py  user_tab.py  dev_tab.py  video_view.py  manual_pad.py
 │  └─ requirements.txt
 │
 └─ 04_unit/<번호_기능>/             # 단위 테스트 기록(test.md) + 수동 점검 스크립트
@@ -133,7 +134,9 @@ logistics-automation/
 |------|--------------|------|
 | `agv_protocol/messages.py` | `parse_command(line)`, `format_status(...)`, `format_event`, `format_error` | 채널 1 텍스트 메시지 (차량·노트북 공용) |
 | `agv_protocol/framing.py` | `pack_frame(jpeg)`, `FrameReader` | 채널 2 길이+JPEG 프레임 |
-| `rfcomm_server.py` | `RfcommServer` | 채널별 소켓 수락·수신 스레드, 하트비트 감시 |
+| `rfcomm_server.py` | `RfcommServer` | 채널별 소켓 수락·연결마다 수신 스레드(새 연결이 이전 연결 대체), `is_alive`, TCP 모드(PC 시험) |
+| `bridge_core.py` | `BridgeCore` | 명령 검증·허용 상태·하트비트 판단·DEV 전달 (ROS 없음, standalone 모드) |
+| `sysinfo.py` | `SysMonitor` | Pi 온도·CPU·메모리 (DEV SYS) |
 | `video_streamer.py` | `VideoStreamer` | 최신 프레임만 유지, 5fps JPEG 인코딩·전송 |
 | `bt_bridge_node.py` | `BtBridgeNode` | 명령 → `/mission/command`·`/safety/estop`, `/mission/status` → STATUS 전송 |
 

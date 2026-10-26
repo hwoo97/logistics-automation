@@ -32,7 +32,7 @@
 | `STATUS <state> <done>/<total> <cargo> <target>` | `STATUS NAVIGATE 1/3 CIRCLE DROP_A` | 현재 상태 (2Hz + 상태가 바뀔 때) |
 | `EVENT <type> <내용>` | `EVENT LOADED CIRCLE` | 주요 사건: `STARTED`, `LOADED`, `UNLOADED`, `PARKED`, `OBSTACLE`, `RESUMED` |
 | `ERROR <code> <내용>` | `ERROR E_MARKER red 갈래 0개` | 오류 발생 (아래 코드표) |
-| `ACK <명령>` / `NAK <명령> <이유>` | `NAK START 작업 중` | 명령 수신 결과 |
+| `ACK <명령>` / `NAK <명령> <이유>` | `NAK START 작업 중` | 명령 수신 결과 (`DEV`는 3-1절) |
 | `PONG` | `PONG` | PING 응답 |
 
 ### 오류 코드
@@ -44,6 +44,32 @@
 | `E_LINE` | 라인 이탈·재탐색 실패 |
 | `E_TURN` | 회전 시간 제한 초과 |
 | `E_LINK` | 블루투스 연결 끊김 (재연결 후 보고) |
+
+## 3-1. 개발자 명령 (채널 1, `DEV`)
+
+노트북 앱 **개발자 탭**에서 하드웨어를 직접 조작하고 내부 값을 보기 위한 명령. `bt_bridge_node`가 받아 해당 ROS 토픽으로 전달한다(하드웨어 직접 접근 없음). 작업 중 끼어들지 않도록 **허용 상태에서만** 받고, 그 외에는 `NAK DEV <하위명령> <이유>`.
+
+**노트북 → Pi**
+| 메시지 | 예시 | 의미 | 전달 토픽 | 허용 상태 |
+|--------|------|------|-----------|-----------|
+| `DEV LED <OFF\|RED\|GREEN\|ERROR>` | `DEV LED RED` | LED 표시 | `/led/state` | IDLE, MANUAL, ESTOP, ERROR |
+| `DEV POSE <LINE\|JUNCTION\|SIGN>` | `DEV POSE SIGN` | 팬틸트 정해진 자세 | `/pantilt/pose` | IDLE, MANUAL, ESTOP, ERROR |
+| `DEV SERVO <pan> <tilt>` | `DEV SERVO 90 60` | 팬·틸트 각도 직접 지정 (0~180°) | `/dev/pantilt_angle` | IDLE, MANUAL, ESTOP, ERROR |
+| `DEV WHEEL <l1> <l2> <l3> <l4>` | `DEV WHEEL 0.3 0.3 0 0` | 바퀴 4개 개별 듀티 (-1.0~1.0, 0.3초마다 반복, 끊기면 정지) | `/dev/wheels` | IDLE, MANUAL |
+| `DEV WATCH <RANGE\|LINE\|SYS\|ALL> <ON\|OFF>` | `DEV WATCH RANGE ON` | 측정값 보내기 켜기/끄기 (연결 끊기면 모두 꺼짐) | — | 모든 상태 |
+| `DEV NODES` | `DEV NODES` | 실행 중인 ROS 노드 목록 요청 | — | 모든 상태 |
+
+**Pi → 노트북** (켠 항목만, 5Hz 이하)
+| 메시지 | 예시 | 의미 |
+|--------|------|------|
+| `DEV RANGE <m>` | `DEV RANGE 0.234` | 초음파 거리(m, 필터 적용) — `/ultrasonic/range` |
+| `DEV LINE <offset> <event>` | `DEV LINE -0.12 NONE` | 라인 오프셋(-1~1)과 이벤트 — `/line/state` |
+| `DEV SYS <temp_c> <cpu_pct> <mem_pct>` | `DEV SYS 52.1 37 41` | Pi CPU 온도·사용률·메모리 (1Hz) |
+| `DEV NODES <이름,...>` | `DEV NODES camera,led_node,motor_node` | `DEV NODES` 응답 |
+
+- `DEV` 명령의 수신 결과는 `ACK DEV <하위명령>` / `NAK DEV <하위명령> <이유>` (예: `NAK DEV WHEEL NAVIGATE 상태에서 불가`)
+- `mission_node`가 아직 없을 때(단위 개발 단계) 상태는 `IDLE`로 본다
+- `DEV WHEEL`은 비상 정지 래치 중에는 `motor_node`가 무시한다 (안전 우선)
 
 ## 4. 영상 프레임 (채널 2)
 
@@ -65,11 +91,15 @@
 - `STOP`은 수신 즉시 `/safety/estop`으로 모터를 멈추고, 이후 상태 머신에 전달 (상태 머신 처리 지연과 무관)
 - 수동 이동 `MOVE`는 0.3초마다 다시 보내야 하며, 0.5초 끊기면 모터 워치독이 정지시킴
 
-## 6. 노트북 앱 화면 (예정)
-| 영역 | 내용 |
-|------|------|
-| 연결 | Pi 주소 선택·연결/해제, 연결 상태 표시 |
-| 작업 | 작업 횟수 입력 → 시작, **비상 정지(크게)**, 재개 |
-| 상태 | 현재 상태, 완료/전체 작업 수, 적재 화물, 목적지, 오류 문구 |
-| 영상 | 채널 2 영상 표시 |
-| 수동 제어 | 방향 버튼 또는 키보드(W/A/S/D) |
+## 6. 노트북 앱 화면
+| 위치 | 영역 | 내용 |
+|------|------|------|
+| 상단 (공통) | 연결 | Pi 주소·연결/해제, 연결 상태, **비상 정지(항상 보임, 스페이스바)** |
+| **사용자 탭** | 작업 | 작업 횟수 입력 → 시작, 재개 |
+| | 상태 | 현재 상태, 완료/전체 작업 수, 적재 화물, 목적지, 최근 사건·오류 |
+| | 영상 | 채널 2 영상 + 상태 문구 |
+| | 수동 제어 | 수동 모드 켜기/끄기, 방향 버튼 또는 W/A/S/D |
+| **개발자 탭** | 하드웨어 조작 | LED, 팬틸트 자세·각도, 바퀴 4개 개별 듀티 |
+| | 측정값 | 초음파 거리 그래프, 라인 오프셋·이벤트, Pi 온도·CPU·메모리, ROS 노드 목록 |
+| | 영상 | FPS·전송 속도 표시, 사진 저장 |
+| | 콘솔 | 주고받은 모든 메시지, 명령 직접 입력, 로그 파일 저장 |

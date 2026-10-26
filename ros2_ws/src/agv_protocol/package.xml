@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>agv_protocol</name>
+  <version>0.1.0</version>
+  <description>BT 메시지·영상 프레임·공통 타입 (순수 Python, 노트북 앱과 공용)</description>
+  <maintainer email="noreply@example.com">logistics-automation team</maintainer>
+  <license>MIT</license>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
