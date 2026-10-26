@@ -46,4 +46,7 @@
 - 완료: [기능 설계서](02_design/software/functional_design.md) (ROS 2 노드·토픽·상태 머신), [블루투스 통신 규약](02_design/communication/bluetooth_protocol.md), [Teachable Machine 클래스](02_design/ai/tm_classes.md)
 - 완료: [부품 목록](02_design/bom.md), [소프트웨어 구조 설계](02_design/software/software_architecture.md), [클래스 설계](02_design/software/class_design.md)
 - 완료: [개발 순서 및 절차](02_design/development_plan.md) (주차별 계획 W1~W4, 관문 G1~G4)
+- 선행 진행(3단계 준비 W1): 블루투스 RFCOMM 에코(286kbps 실측), Camera Module 3 Wide, I2C·PCA9685·서보(팬 ch0, 틸트 ch1) 확인 — [03_setup](03_setup/README.md)
+- 코드: [노트북 앱](laptop_app/README.md)(사용자·개발자 탭, 가짜 차량), S0용 Pi 노드(하드웨어 4개 + 블루투스 브리지) — [ros2_ws](ros2_ws/README.md)
+- 다음: Pi에서 빌드·실행 → 노트북 앱 개발자 탭으로 S0(바퀴 위치·방향, LED, 팬틸트, 초음파, 영상)
 - 남은 일: 보유 부품·Pi 5 메모리 확인 후 2단계 완료 → 3단계(준비)
