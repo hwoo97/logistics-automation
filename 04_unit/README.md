@@ -5,7 +5,7 @@
 - 01_camera — 키트 카메라 + Ubuntu + camera_ros 동작 확인, 팬틸트 서보(PCA9685)로 각도 전환 (가장 큰 리스크라 먼저)
 - 02_motor — 제어보드 DRV8835 × 2, 바퀴 4개 개별 제어(lgpio 소프트웨어 PWM), 전진/후진/회전/유턴
 - 03_line_tracing — 카메라 기반 라인 추종
-- 04_line_color — 카메라로 라인 색 판별
+- 04_color_marker — 분기점 목적지 색 마커 판별 (빨강·초록·파랑·노랑)
 - 05_ultrasonic — 거리 측정, 적재 거리(3초 유지)·장애물 정지
 - 06_led — 빨강 = 원, 초록 = 사각형
 - 07_bluetooth_control — 작업 횟수 입력, 비상 정지, 수동 제어
