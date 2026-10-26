@@ -33,12 +33,13 @@
 <a id="p2"></a>
 ## 2단계 · 시스템 설계
 **할 일**
-- **하드웨어** (선정 완료): PiCar-R5 키트(Pi 5, 제어보드 DRV8835 × 2 + PCA9685, TT 모터 4개, 카메라 + 팬틸트, 7.4V 배터리) + 브레드보드(초음파, 빨강·초록 LED) — 모터·서보 핀맵 확정 ([pinmap.md](02_design/hardware/pinmap.md)), 남은 일: **초음파·LED 핀 확정, 브레드보드 배선도**(Echo 분압, LED 저항)
+- **하드웨어** (선정 완료): PiCar-R5 키트(Pi 5, 제어보드 DRV8835 × 2 + PCA9685, TT 모터 4개, 카메라 + 팬틸트, 7.4V 배터리) + 브레드보드(초음파, 빨강·초록 LED) — 핀맵 확정 ([pinmap.md](02_design/hardware/pinmap.md)), 브레드보드 배선도 ([wiring.md](02_design/hardware/wiring.md))
 - **트랙**: 먼저 **테스트 트랙**을 설계 ([test_track.md](02_design/track/test_track.md)) → 3단계에서 제작 → 4단계 실험 결과로 **실제 트랙**(라인 굵기·색, 정지선, 곡선 반경, 표지판 위치, 유턴·복귀·주차 경로) 설계 → 5단계 전 제작
-- **소프트웨어**: 상태 머신(대기 → 작업장 이동 → 적재 → 운반 → 하차 → 복귀 → 주차), 물류 처리 알고리즘, **ROS 2 패키지·노드·토픽 구조**
-- **통신**: 블루투스(RFCOMM) 규약 — 명령 형식(작업 횟수, 비상 정지, 수동 제어), 영상 프레임 형식, 제어 우선 처리
-- **AI**: Teachable Machine 클래스 정의(원, 사각형, 표지판, 배경), 데이터 수집 계획, TFLite 변환
-- 부품 목록(BOM)과 예산
+- **소프트웨어** (작성 완료): 상태 머신, 분기점 판단, ROS 2 패키지·노드·토픽 구조, 기능별 상세 — [functional_design.md](02_design/software/functional_design.md), 코드 구조(계층·패키지·모듈·테스트) — [software_architecture.md](02_design/software/software_architecture.md), 클래스 — [class_design.md](02_design/software/class_design.md)
+- **통신** (작성 완료): 블루투스 RFCOMM 규약 — [bluetooth_protocol.md](02_design/communication/bluetooth_protocol.md)
+- **AI** (작성 완료): Teachable Machine 모델·클래스·데이터 수집 계획 — [tm_classes.md](02_design/ai/tm_classes.md)
+- 부품 목록(BOM)과 예산 (작성 완료) — [bom.md](02_design/bom.md)
+- 개발 순서·절차 (작성 완료): 작업 흐름 4개·의존 관계·주차별 계획(W1~W4)·관문 G1~G4·기능 개발 절차·Git 규칙 — [development_plan.md](02_design/development_plan.md), 실행 점검표 [weekly_checklist.md](02_design/weekly_checklist.md)
 
 **완료 기준**
 - 미결 사항 테이블의 설계 항목이 모두 "결정" 상태
@@ -49,11 +50,13 @@
 **할 일**
 - 부품 구매 및 수령 확인
 - Pi 5에 Ubuntu 24.04 LTS + ROS 2 Jazzy 설치
-- **키트 카메라 동작 확인** (센서 종류 확인 → libcamera + camera_ros) — 가장 먼저, 막히면 USB 웹캠으로 대체
+- **Camera Module 3 Wide 동작 확인** (Ubuntu용 libcamera + camera_ros) — 가장 먼저, 막히면 USB 웹캠으로 대체
 - lgpio 설치(모터 DIR + 소프트웨어 PWM), **I2C 활성화**(PCA9685 서보), 블루투스 페어링
 - **TFLite 추론 런타임 확인** (Ubuntu 24.04 기본 Python 3.12 호환)
 - 노트북 Python 환경, Teachable Machine 준비
 - ROS 2 워크스페이스(`ros2_ws`) 생성
+- 부팅 시 자동 실행 설정 (systemd 서비스, 시연용)
+- 표지판·이미지판 디자인 파일 제작 → 출력 ([tm_classes.md](02_design/ai/tm_classes.md) 디자인 원칙)
 - 트랙 제작
 
 **완료 기준**
@@ -61,7 +64,7 @@
 
 <a id="p4"></a>
 ## 4단계 · 단위 기능 개발
-기능마다 **ROS 2 노드 개발 → 단독 테스트 → 결과 기록** 순서로 진행한다. 코드는 `ros2_ws/src/`·`laptop_app/`, 테스트 기록은 `04_unit/<번호_기능>/test.md`. 트랙이 필요한 검증은 [단계별 테스트 트랙](02_design/track/test_track.md) S0~S10을 따른다. 권장 순서:
+기능마다 **ROS 2 노드 개발 → 단독 테스트 → 결과 기록** 순서로 진행한다 (세부 절차·주차별 계획: [개발 순서 및 절차](02_design/development_plan.md)). 코드는 `ros2_ws/src/`·`laptop_app/`, 테스트 기록은 `04_unit/<번호_기능>/test.md`. 트랙이 필요한 검증은 [단계별 테스트 트랙](02_design/track/test_track.md) S0~S10을 따른다. 권장 순서:
 1. 카메라 + 팬틸트 (영상 토픽 발행, 서보로 라인용·표지판용 각도 전환)
 2. 모터 제어 (바퀴 4개 개별 제어 — 전진/후진/회전/유턴)
 3. 라인 트레이싱 (카메라 기반 — 직선, 곡선, 분기점)

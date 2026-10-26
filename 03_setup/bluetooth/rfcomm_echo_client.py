@@ -51,8 +51,10 @@ def echo_test(sock, count, interval):
         try:
             line, buf = recv_line(sock, buf)
         except socket.timeout:
-            lost += 1
-            continue
+            # 응답이 제한 시간 안에 없으면 연결이 끊긴 것으로 보고 중단 (계속 기다리면 채널을 붙잡고 멈춤)
+            lost += count - i
+            print(f"PING {i} 응답 없음 → 연결 끊김으로 보고 중단")
+            break
         rtt = (time.perf_counter() - start) * 1000
         if line == msg:
             rtts.append(rtt)
@@ -88,21 +90,38 @@ def main():
     if not args.tcp and not args.address:
         parser.error("Pi 블루투스 주소 또는 --tcp 를 지정")
 
-    sock, t_conn = connect(args)
+    try:
+        sock, t_conn = connect(args)
+    except OSError as e:
+        print(f"연결 실패: {e}")
+        if getattr(e, "winerror", None) == 10048:
+            print("→ 이 PC에서 이전 클라이언트가 같은 채널 연결을 아직 잡고 있음. 그 프로그램을 종료한 뒤 다시 실행")
+        else:
+            print("→ Pi 서버가 실행 중인지, 채널 번호·주소·페어링 상태 확인")
+        raise SystemExit(1)
     print(f"연결 성공 ({t_conn:.2f}초)")
-    with sock:
-        rtts, lost = echo_test(sock, args.count, args.interval)
-        if rtts:
-            rtts_sorted = sorted(rtts)
-            p95 = rtts_sorted[max(0, int(len(rtts_sorted) * 0.95) - 1)]
-            print(f"에코 {len(rtts)}/{args.count} 성공, 유실 {lost}")
-            print(f"RTT(ms) 최소 {min(rtts):.1f} / 평균 {statistics.mean(rtts):.1f} / "
-                  f"95% {p95:.1f} / 최대 {max(rtts):.1f}")
-        kbps = None
-        if args.bulk:
-            elapsed, kbps = bulk_test(sock, args.bulk)
-            print(f"처리량 Pi→노트북: {args.bulk}바이트 {elapsed:.2f}초 = {kbps:.0f} kbps")
-        sock.sendall(b"QUIT\n")
+    try:
+        run_tests(sock, args)
+    except (OSError, ConnectionError) as e:
+        print(f"시험 중 연결 끊김: {e}")
+        raise SystemExit(1)
+    finally:
+        sock.close()
+
+
+def run_tests(sock, args):
+    rtts, lost = echo_test(sock, args.count, args.interval)
+    print(f"에코 {len(rtts)}/{args.count} 성공, 유실 {lost}")
+    if rtts:
+        rtts_sorted = sorted(rtts)
+        p95 = rtts_sorted[max(0, int(len(rtts_sorted) * 0.95) - 1)]
+        print(f"RTT(ms) 최소 {min(rtts):.1f} / 평균 {statistics.mean(rtts):.1f} / "
+              f"95% {p95:.1f} / 최대 {max(rtts):.1f}")
+    kbps = None
+    if args.bulk and lost == 0:
+        elapsed, kbps = bulk_test(sock, args.bulk)
+        print(f"처리량 Pi→노트북: {args.bulk}바이트 {elapsed:.2f}초 = {kbps:.0f} kbps")
+    sock.sendall(b"QUIT\n")
 
     print("\n[판정]")
     ok_echo = bool(rtts) and lost == 0

@@ -18,6 +18,11 @@ ros2_ws/log/
 04_unit/08_ai_vision/dataset/*
 !04_unit/08_ai_vision/dataset/.gitkeep
 
+# 시험 중 찍은 사진·로그 (용량 큼)
+captures/
+*.bag
+rosbag2_*/
+
 # 에디터·OS
 .vscode/
 .idea/
