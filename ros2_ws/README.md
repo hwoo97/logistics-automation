@@ -6,7 +6,7 @@
 | 패키지 | 내용 | 시험 |
 |------|------|------|
 | `agv_protocol` | BT 메시지·영상 프레임·공통 타입 (순수 Python, 노트북 앱과 공용) | pytest 56 |
-| `agv_hw` | 드라이버(모터 DRV8835·서보 PCA9685·초음파·LED, 가짜 포함) + 노드 `motor_node` `pantilt_node` `ultrasonic_node` `led_node` | pytest 20 (모터 드라이버 4 포함) |
+| `agv_hw` | 드라이버(모터 DRV8835·서보 PCA9685·초음파·LED, 가짜 포함) + 노드 `motor_node` `pantilt_node` `ultrasonic_node` `led_node` | pytest 21 (모터 드라이버 4 포함) |
 | `agv_bt` | `RfcommServer`, `BridgeCore`(명령 판단), `VideoStreamer`, `SysMonitor` + 노드 `bt_bridge_node` | pytest 14 (RfcommServer 4 포함) |
 | `agv_bringup` | `launch/s0_hw.launch.py`, `config/params.yaml` | — |
 

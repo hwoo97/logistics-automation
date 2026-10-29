@@ -14,7 +14,7 @@
 
 - 바퀴 4개를 **각각 따로** 제어 (모터마다 방향 1핀 + PWM 1핀)
 - DIR = 회전 방향(0/1), PWM 듀티 = 속도
-- 확인 필요: L1~L4가 차체의 어느 바퀴인지 (좌전·좌후·우전·우후), DIR 값과 실제 전진 방향의 관계 → 4단계 모터 테스트에서 확정
+- 바퀴 위치·방향 (2026-10-29 S0 확정, 양수 듀티 기준): **L1 앞왼쪽(뒤로) · L2 앞오른쪽(앞으로) · L3 뒤왼쪽(뒤로) · L4 뒤오른쪽(앞으로)** → `params.yaml` `wheel_map: [front_left, front_right, rear_left, rear_right]`, `invert: [true, false, true, false]` (왼쪽 두 바퀴 반전)
 
 ### Pi 5 + Ubuntu 구현 메모
 - PWM 핀 19·21·23·25 중 Pi 5 하드웨어 PWM은 GPIO19뿐 → **lgpio 소프트웨어 PWM**으로 4개를 같은 방식으로 제어 (DC 모터 속도 제어에는 충분)

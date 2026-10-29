@@ -42,7 +42,7 @@
 - [x] 드라이버 4종(실제·가짜): 모터, 서보, 초음파, LED (코드·pytest, Pi 실행 확인 남음)
 - [x] hw 노드 4개: motor, pantilt, ultrasonic, led + 모터 워치독(0.5초) (코드, Pi 실행 확인 남음)
 - [ ] `s0_hw.launch.py` 실행 → 노트북 앱 개발자 탭으로 S0 ([절차](../ros2_ws/README.md))
-- [ ] L1~L4가 어느 바퀴인지, 전진 방향 DIR 값 확인 → `params.yaml`의 `wheel_map`·`invert`
+- [x] L1~L4가 어느 바퀴인지, 전진 방향 DIR 값 확인 → `params.yaml`의 `wheel_map`·`invert` (2026-10-29: L1 앞왼·L2 앞오·L3 뒤왼·L4 뒤오, L1·L3 반전)
 - [ ] 팬틸트 자세 LINE·JUNCTION·SIGN 각도 확인
 
 ### B · 비전·AI

@@ -17,8 +17,8 @@ class MotorNode(Node):
         chip = p("gpio_chip", -1).value
         duty_max = p("duty_max", 0.75).value
         pwm_hz = p("pwm_hz", 1000).value
-        names = p("wheel_map", ["front_left", "rear_left", "front_right", "rear_right"]).value  # L1~L4 순서
-        invert = p("invert", [False, False, False, False]).value
+        names = p("wheel_map", ["front_left", "front_right", "rear_left", "rear_right"]).value  # L1~L4 순서
+        invert = p("invert", [True, False, True, False]).value
         self.turn_gain = p("turn_gain", 1.0).value
         timeout = p("watchdog_s", 0.5).value
 

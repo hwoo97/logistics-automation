@@ -70,3 +70,10 @@ def test_fake_drivers():
     led.set(True, False)
     led.close()
     assert led.state == (False, False)
+
+
+def test_s0_wheel_map_forward_and_turn():
+    """2026-10-29 S0 확정 배치: L1 앞왼 · L2 앞오 · L3 뒤왼 · L4 뒤오 (반전은 드라이버에서)."""
+    s0 = {"L1": "front_left", "L2": "front_right", "L3": "rear_left", "L4": "rear_right"}
+    assert wheel_speeds(0.5, 0.5, s0) == {"L1": 0.5, "L2": 0.5, "L3": 0.5, "L4": 0.5}
+    assert wheel_speeds(-0.3, 0.3, s0) == {"L1": -0.3, "L2": 0.3, "L3": -0.3, "L4": 0.3}

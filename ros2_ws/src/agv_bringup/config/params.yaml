@@ -5,8 +5,8 @@ motor_node:
   ros__parameters:
     duty_max: 0.75              # TT 모터 보호 (7.4V 배터리)
     pwm_hz: 1000
-    wheel_map: [front_left, rear_left, front_right, rear_right]   # L1~L4가 어느 바퀴인지 — S0에서 확정
-    invert: [false, false, false, false]                          # L1~L4 극성 반전 — S0에서 확정
+    wheel_map: [front_left, front_right, rear_left, rear_right]   # L1~L4가 어느 바퀴인지 — 2026-10-29 S0 확정
+    invert: [true, false, true, false]                            # L1~L4 극성 반전 — 2026-10-29 S0: 양수에서 L1·L3(왼쪽) 뒤로 돎
     turn_gain: 1.0
     watchdog_s: 0.5
     gpio_chip: -1               # -1 = RP1 칩 자동 탐색
