@@ -25,7 +25,8 @@ class LgpioMotorDriver(MotorDriver):
         self.lgpio.gpio_write(self.h, dir_pin, 1 if speed < 0 else 0)
         duty = abs(speed) * self.duty_max * 100.0
         if duty < 0.5:
-            self.lgpio.tx_pwm(self.h, pwm_pin, 0, 0)
+            # 주파수 0은 lgpio가 'bad PWM micros'로 거부 → 듀티 0으로 PWM 정지 (2026-10-29 Pi에서 확인)
+            self.lgpio.tx_pwm(self.h, pwm_pin, self.pwm_hz, 0)
             self.lgpio.gpio_write(self.h, pwm_pin, 0)
         else:
             self.lgpio.tx_pwm(self.h, pwm_pin, self.pwm_hz, duty)
@@ -35,7 +36,10 @@ class LgpioMotorDriver(MotorDriver):
             self.set_wheel(wheel, 0.0)
 
     def close(self) -> None:
-        self.stop_all()
+        try:
+            self.stop_all()
+        except self.lgpio.error:
+            pass  # 정지에 실패해도 핀은 풀어서 다음 실행이 막히지 않게 한다
         for dir_pin, pwm_pin in self.pins.values():
             for pin in (dir_pin, pwm_pin):
                 try:

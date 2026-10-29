@@ -22,7 +22,7 @@ from agv_protocol.messages import (
 )
 from agv_protocol.types import CARGO_LED, CARGO_TARGET, Cargo, Target
 
-POSES = {"LINE": (90, 40), "JUNCTION": (90, 60), "SIGN": (90, 95)}
+POSES = {"LINE": (65, 150), "JUNCTION": (65, 165), "SIGN": (65, 180)}
 MISSION_STATES = {"UTURN", "NAVIGATE", "AT_JUNCTION", "CHECK_SIGN", "APPROACH", "LOAD", "UNLOAD", "PARKED"}
 FAKE_NODES = ["camera", "line_node", "marker_node", "classifier_node", "drive_node", "mission_node",
               "motor_node", "pantilt_node", "ultrasonic_node", "led_node", "bt_bridge_node"]

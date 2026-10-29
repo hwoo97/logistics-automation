@@ -181,7 +181,7 @@ logistics-automation/
 ### 파라미터 파일 `config/params.yaml` (구조)
 ```yaml
 motor_node:      { ros__parameters: { duty_max: 0.75, pwm_hz: 1000, wheel_map: [...], invert: [...], use_fake_hw: false } }
-pantilt_node:    { ros__parameters: { pan_channel: 0, tilt_channel: 1, poses: { LINE: [90, 40], JUNCTION: [90, 60], SIGN: [90, 95] } } }
+pantilt_node:    { ros__parameters: { pan_channel: 0, tilt_channel: 1, poses: { LINE: [65, 150], JUNCTION: [65, 165], SIGN: [65, 180] } } }
 line_node:       { ros__parameters: { roi_ratio: 0.33, stop_line_width_ratio: [2.0, 5.0], confirm_frames: 3 } }
 marker_node:     { ros__parameters: { hsv: { red: [...], green: [...], blue: [...], yellow: [...] }, min_area: 200, vote_frames: 10 } }
 classifier_node: { ros__parameters: { cargo_model: models/cargo.tflite, sign_model: models/sign.tflite, min_score: 0.8 } }

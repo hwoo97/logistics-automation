@@ -44,7 +44,7 @@ class DevTab(ttk.Frame):
         pt.pack(fill="x", pady=(0, 4))
         for i, p in enumerate(("LINE", "JUNCTION", "SIGN")):
             ttk.Button(pt, text=p, width=9, command=lambda p=p: self.send("DEV", "POSE", p)).grid(row=0, column=i, padx=2, pady=2)
-        self.pan, self.tilt = tk.DoubleVar(value=90), tk.DoubleVar(value=40)
+        self.pan, self.tilt = tk.DoubleVar(value=65), tk.DoubleVar(value=150)
         for r, (name, var) in enumerate((("팬", self.pan), ("틸트", self.tilt)), start=1):
             ttk.Label(pt, text=name).grid(row=r, column=0, sticky="e")
             s = tk.Scale(pt, from_=0, to=180, orient="horizontal", variable=var, length=170, resolution=1)

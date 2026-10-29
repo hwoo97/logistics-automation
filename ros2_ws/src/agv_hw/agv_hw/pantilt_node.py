@@ -16,7 +16,7 @@ class PanTiltNode(Node):
         self.tilt_ch = p("tilt_channel", 1).value
         self.settle_s = p("settle_s", 0.3).value
         self.poses = {pose.value: p(f"poses.{pose.value}", default).value
-                      for pose, default in ((Pose.LINE, [90, 40]), (Pose.JUNCTION, [90, 60]), (Pose.SIGN, [90, 95]))}
+                      for pose, default in ((Pose.LINE, [65, 150]), (Pose.JUNCTION, [65, 165]), (Pose.SIGN, [65, 180]))}
         bus, address = p("i2c_bus", 1).value, p("address", 0x40).value
         oe, chip = p("oe_pin", 17).value, p("gpio_chip", -1).value
         if fake:

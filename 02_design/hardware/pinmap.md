@@ -35,6 +35,7 @@
 |------|:---:|------|
 | 팬(좌우) | **0** | 2026-10-26 `pca9685_check.py --channel 0` 동작 |
 | 틸트(상하) | **1** | 2026-10-26 `pca9685_check.py --channel 1` 동작 |
+- 각도 (2026-10-29 S0): **팬 65° = 정면**, 틸트는 숫자가 클수록 위 — **150° 전방 아래(라인), 180° 전방** → `params.yaml` `poses` LINE [65, 150] · JUNCTION [65, 165] (초기값) · SIGN [65, 180]
 - 서보 선을 다른 헤더로 옮기면 `params.yaml`의 `pan_channel`·`tilt_channel`도 바꾼다
 - 교재는 `adafruit-circuitpython-servokit`(Blinka) 사용. Ubuntu에서는 I2C 활성화 후 같은 라이브러리 또는 `smbus2`로 PCA9685 직접 제어
 
