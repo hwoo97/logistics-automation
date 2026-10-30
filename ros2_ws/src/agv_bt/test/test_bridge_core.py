@@ -79,6 +79,27 @@ def test_stop_resume(core):
     assert io.replies("EVENT")[-1]["event"] == "RESUMED"
 
 
+def test_drive_follow_and_stop(core):
+    c, io = core
+    c.on_line("DEV DRIVE FOLLOW")
+    assert ("drive", "FOLLOW") in io.calls and io.replies("ACK")[-1]["command"] == "DEV DRIVE"
+    c.set_driving(True)
+    for line in ("MANUAL ON", "DEV WHEEL 0.5 0 0 0", "DEV DRIVE FOLLOW"):     # 주행 중 겹치는 명령 거부
+        c.on_line(line)
+        assert "라인 주행 중" in io.replies("NAK")[-1]["reason"]
+    c.on_line("DEV SPEED 0.7")                                              # 속도는 허용
+    assert ("speed", 0.7) in io.calls
+    c.on_line("DEV DRIVE STOP")
+    assert ("drive", "STOP") in io.calls
+
+
+def test_drive_follow_rejected_outside_idle(core):
+    c, io = core
+    c.on_line("MANUAL ON")
+    c.on_line("DEV DRIVE FOLLOW")
+    assert io.replies("NAK")[-1]["command"] == "DEV DRIVE" and ("drive", "FOLLOW") not in io.calls
+
+
 def test_manual_move(core):
     c, io = core
     c.on_line("MOVE 0.5 0")

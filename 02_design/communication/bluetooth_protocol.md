@@ -56,6 +56,7 @@
 | `DEV POSE <LINE\|JUNCTION\|SIGN>` | `DEV POSE SIGN` | 팬틸트 정해진 자세 | `/pantilt/pose` | IDLE, MANUAL, ESTOP, ERROR |
 | `DEV SERVO <pan> <tilt>` | `DEV SERVO 90 60` | 팬·틸트 각도 직접 지정 (0~180°) | `/dev/pantilt_angle` | IDLE, MANUAL, ESTOP, ERROR |
 | `DEV WHEEL <l1> <l2> <l3> <l4>` | `DEV WHEEL 0.3 0.3 0 0` | 바퀴 4개 개별 듀티 (-1.0~1.0, 0.3초마다 반복, 끊기면 정지) | `/dev/wheels` | IDLE, MANUAL |
+| `DEV DRIVE <FOLLOW\|STOP>` | `DEV DRIVE FOLLOW` | 시험용 라인 주행 시작(drive_node FOLLOW_TO_EVENT)·정지(취소). 주행 중에는 `MANUAL ON`·`DEV WHEEL`·`DEV DRIVE FOLLOW` 거부. 결과는 `DEV DRIVE RUNNING` / `DEV DRIVE DONE <끝난 이유>` / `DEV DRIVE REJECTED <이유>` | `/drive` 액션 | FOLLOW: IDLE, STOP: 모든 상태 |
 | `DEV SPEED <v>` | `DEV SPEED 0.7` | 라인 주행 기본 속도 (0.2~1.0) — drive_node에 바로 적용, 주행 중에도 | `/drive/speed` | 모든 상태 |
 | `DEV WATCH <RANGE\|LINE\|SYS\|ALL> <ON\|OFF>` | `DEV WATCH RANGE ON` | 측정값 보내기 켜기/끄기 (연결 끊기면 모두 꺼짐) | — | 모든 상태 |
 | `DEV NODES` | `DEV NODES` | 실행 중인 ROS 노드 목록 요청 | — | 모든 상태 |

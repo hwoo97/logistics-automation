@@ -48,6 +48,7 @@ class FakeVehicle:
         self.cycle = 0
         self.offset = 0.0
         self.drive_speed = 0.6                     # DEV SPEED (drive_node 기본 속도 흉내)
+        self.drive_end = None                      # DEV DRIVE FOLLOW — 이 시각에 정지선 도착 흉내
 
     # ── 로그·전송 ─────────────────────────────────────────
 
@@ -86,6 +87,9 @@ class FakeVehicle:
         self.wheels, self.move = [0.0] * 4, (0.0, 0.0)
         self.set_state("ESTOP")
         self.log(f"비상 정지: {reason}")
+        if self.drive_end is not None:
+            self.drive_end = None
+            self.send(format_dev("DRIVE", "DONE", "E_ESTOP"))
 
     # ── 명령 처리 ─────────────────────────────────────────
 
@@ -150,6 +154,15 @@ class FakeVehicle:
             self.wheels, self.last_wheel = [float(v) for v in rest], now
         elif sub == "SPEED":
             self.drive_speed = float(rest[0])
+        elif sub == "DRIVE":
+            if rest[0] == "FOLLOW":
+                self.drive_end = now + 6.0 / self.drive_speed      # 빠를수록 일찍 도착
+                self.send(format_dev("DRIVE", "RUNNING"))
+            elif self.drive_end is not None:
+                self.drive_end = None
+                self.send(format_dev("DRIVE", "DONE", "STOPPED"))
+            else:
+                self.send(format_dev("DRIVE", "DONE", "STOPPED"))
         elif sub == "WATCH":
             keys = WATCH_KEYS if rest[0] == "ALL" else (rest[0],)
             for k in keys:
@@ -219,6 +232,9 @@ class FakeVehicle:
             if now - self.last_move > 0.5:
                 self.move = (0.0, 0.0)
             self._advance(now)
+            if self.drive_end is not None and now >= self.drive_end:
+                self.drive_end = None
+                self.send(format_dev("DRIVE", "DONE", "STOP_LINE"))
             if self.state == "MANUAL":
                 self.offset = max(-1.0, min(1.0, self.offset * 0.97 - self.move[1] * 0.05))
             elif self.state not in ("ESTOP", "IDLE", "PARKED"):

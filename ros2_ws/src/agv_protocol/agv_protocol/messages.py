@@ -30,12 +30,14 @@ ALLOWED_STATES = {
     "DEV SERVO": _HW_STATES,
     "DEV WHEEL": frozenset({"IDLE", "MANUAL"}),
     "DEV SPEED": ALL_STATES,              # 주행 중에도 속도 조절
+    "DEV DRIVE": ALL_STATES,              # STOP은 언제나, FOLLOW는 IDLE에서만 (check_allowed)
     "DEV WATCH": ALL_STATES,
     "DEV NODES": ALL_STATES,
 }
 
 WATCH_KEYS = ("RANGE", "LINE", "SYS")
 SPEED_RANGE = (0.2, 1.0)        # DEV SPEED — drive_node 기본 선속도
+DRIVE_ACTIONS = ("FOLLOW", "STOP")      # DEV DRIVE — 시험용 라인 주행 시작·정지
 
 
 @dataclass
@@ -93,6 +95,10 @@ def _validate_dev(cmd: Command) -> None:
         if len(rest) != 1:
             raise ValueError("DEV SPEED: 주행 기본 속도 1개 필요 (0.2~1.0)")
         _number(rest[0], SPEED_RANGE[0], SPEED_RANGE[1], "speed")
+    elif sub == "DRIVE":
+        if len(rest) != 1 or rest[0].upper() not in DRIVE_ACTIONS:
+            raise ValueError(f"DEV DRIVE: {'/'.join(DRIVE_ACTIONS)} 중 하나")
+        cmd.args[1] = rest[0].upper()                 # rest는 복사본 — 원본 인자를 바꿈
     elif sub == "WATCH":
         if len(rest) != 2 or rest[0] not in (*WATCH_KEYS, "ALL") or rest[1] not in ("ON", "OFF"):
             raise ValueError("DEV WATCH: <RANGE|LINE|SYS|ALL> <ON|OFF>")
@@ -145,6 +151,8 @@ def command_key(line: str) -> str:
 def check_allowed(cmd: Command, state: str) -> str | None:
     """현재 상태에서 받을 수 있으면 None, 아니면 NAK 이유."""
     allowed = ALLOWED_STATES.get(cmd.key, frozenset())
+    if cmd.key == "DEV DRIVE" and cmd.args[1:] == ["FOLLOW"] and state != "IDLE":
+        return f"{state} 상태에서 불가 (라인 주행 시작은 IDLE에서만)"
     if state in allowed:
         return None
     return f"{state} 상태에서 불가"
@@ -229,6 +237,8 @@ def parse_reply(line: str) -> dict:
             if kind == "SYS":
                 return {"type": "DEV", "kind": kind, "temp": float(rest[1]),
                         "cpu": float(rest[2]), "mem": float(rest[3])}
+            if kind == "DRIVE":                 # DEV DRIVE <RUNNING|DONE|REJECTED> [<결과·이유>]
+                return {"type": "DEV", "kind": kind, "state": rest[1], "result": " ".join(rest[2:])}
             if kind == "NODES":
                 return {"type": "DEV", "kind": kind, "nodes": rest[1].split(",") if len(rest) > 1 else []}
     except (IndexError, ValueError) as e:

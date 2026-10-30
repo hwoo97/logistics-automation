@@ -67,12 +67,13 @@ cd ~/logistics-automation && git pull
 cd ros2_ws && colcon build --symlink-install && source install/setup.bash   # agv_control·Drive 액션 새로 추가
 ros2 launch agv_bringup s1_line.launch.py
 ```
-다른 터미널에서 주행 시작 (라인 위에 차량을 두고):
+**노트북 앱 개발자 탭 "라인 주행 시험" → ▶ 출발 / ■ 정지** (카메라를 LINE 자세로 내린 뒤 출발, 끝난 이유가 옆에 표시됨). 또는 다른 터미널에서 직접 (라인 위에 차량을 두고):
 ```bash
 source ~/logistics-automation/ros2_ws/install/setup.bash
 ros2 action send_goal /drive agv_interfaces/action/Drive "{command: FOLLOW_TO_EVENT}" --feedback
 ```
-- 멈추는 경우: 정지선·코너·라인 끝 확정, 라인 상태 0.5초 끊김(E_LINE), 노트북 앱 **비상 정지(Space)**(E_ESTOP), 이 터미널 **Ctrl+C**(취소)
+- 멈추는 경우: 정지선·코너·라인 끝 확정, 라인 상태 0.5초 끊김(E_LINE), 노트북 앱 **비상 정지(Space)**(E_ESTOP), 앱 **■ 정지** 또는 터미널 **Ctrl+C**(취소)
+- 주행 중에는 앱의 수동 모드·바퀴 직접 조작이 거부된다 (/cmd_vel 충돌 방지)
 - 확인: 라인이 오른쪽에 있을 때 오른쪽으로 꺾는지(반대면 kp 부호가 아니라 카메라·바퀴 설정 확인), 직선 1.5m를 이탈 없이 가는지
 - 속도는 노트북 앱 개발자 탭 **"주행 속도"** 슬라이더로 주행 중에도 바꿀 수 있다 (재시작하면 params.yaml 값으로 돌아감 — 잘 맞는 값은 `speed`에 적어 둠)
 - 조정(params.yaml `drive_node`): 안 움직이면 `speed`·`min_speed` ↑, 지그재그면 `kp` ↓ 또는 `kd` ↑, 늦게 꺾으면 `kp` ↑, 비스듬히 선 채로 라인과 엇갈려 가면 `kh` ↑, 각도 때문에 흔들리면 `kh` ↓ 또는 `heading_deadband_deg` ↑

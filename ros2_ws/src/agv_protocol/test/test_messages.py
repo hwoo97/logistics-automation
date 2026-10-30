@@ -18,6 +18,8 @@ from agv_protocol.types import Cargo, State, Target
     ("DEV WATCH ALL ON", "DEV", ["WATCH", "ALL", "ON"]),
     ("DEV NODES", "DEV", ["NODES"]),
     ("DEV speed 0.55", "DEV", ["SPEED", "0.55"]),
+    ("DEV drive follow", "DEV", ["DRIVE", "FOLLOW"]),
+    ("DEV DRIVE STOP", "DEV", ["DRIVE", "STOP"]),
 ])
 def test_parse_valid(line, kind, args):
     cmd = parse_command(line)
@@ -29,6 +31,7 @@ def test_parse_valid(line, kind, args):
     "MOVE a b", "DEV", "DEV LED BLUE", "DEV SERVO 90", "DEV SERVO 200 90", "DEV WHEEL 0 0 0",
     "DEV WHEEL 2 0 0 0", "DEV WATCH RANGE", "DEV WATCH FOO ON", "DEV NODES x", "DEV FOO", "JUMP",
     "DEV SPEED", "DEV SPEED 0.1", "DEV SPEED 1.5", "DEV SPEED fast", "DEV SPEED 0.5 0.5",
+    "DEV DRIVE", "DEV DRIVE GO", "DEV DRIVE FOLLOW STOP",
 ])
 def test_parse_invalid(line):
     with pytest.raises(ValueError):
@@ -60,6 +63,11 @@ def test_command_key():
     ("DEV WATCH SYS ON", "NAVIGATE", True),
     ("DEV SPEED 0.6", "NAVIGATE", True),       # 주행 중에도
     ("DEV SPEED 0.6", "ESTOP", True),
+    ("DEV DRIVE FOLLOW", "IDLE", True),
+    ("DEV DRIVE FOLLOW", "MANUAL", False),       # 수동 조종 중엔 시작 불가
+    ("DEV DRIVE FOLLOW", "ESTOP", False),
+    ("DEV DRIVE STOP", "ESTOP", True),           # 정지는 언제나
+    ("DEV DRIVE STOP", "MANUAL", True),
 ])
 def test_check_allowed(line, state, ok):
     assert (check_allowed(parse_command(line), state) is None) == ok
@@ -109,6 +117,9 @@ def test_dev_replies():
     assert parse_reply("DEV LINE 0.1 NONE NONE 87.5")["angle"] == pytest.approx(87.5)
     assert parse_reply("DEV LINE 0.1 NONE NONE -")["angle"] is None     # 각도 못 믿음
     assert parse_reply("DEV LINE 0.1 NONE")["angle"] is None
+    r = parse_reply(format_dev("DRIVE", "DONE", "STOP_LINE"))
+    assert (r["kind"], r["state"], r["result"]) == ("DRIVE", "DONE", "STOP_LINE")
+    assert parse_reply("DEV DRIVE RUNNING")["result"] == ""
     r = parse_reply(format_dev("LINE", -0.12, "NONE"))
     assert (r["offset"], r["event"]) == (pytest.approx(-0.12), "NONE")
     r = parse_reply(format_dev("SYS", 52.1, 37.0, 41.0))

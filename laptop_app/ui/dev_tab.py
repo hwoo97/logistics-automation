@@ -183,17 +183,33 @@ class DevTab(ttk.Frame):
         return f
 
     def _build_speed(self, master):
-        """주행 속도 (DEV SPEED → /drive/speed) — drive_node 기본 선속도, 주행 중에도 바로 적용."""
-        f = ttk.LabelFrame(master, text="주행 속도  (drive_node, 0.2~1.0)")
+        """라인 주행 시험 — 출발·정지(DEV DRIVE → /drive 액션), 속도(DEV SPEED → /drive/speed, 주행 중에도)."""
+        f = ttk.LabelFrame(master, text="라인 주행 시험  (drive_node)")
+        run = ttk.Frame(f)
+        run.grid(row=0, column=0, columnspan=3, sticky="w", padx=4, pady=(2, 4))
+        tk.Button(run, text="▶ 출발", bg="#2e7d32", fg="white", font=("맑은 고딕", 10, "bold"), width=8,
+                  command=self._start_drive).pack(side="left")
+        tk.Button(run, text="■ 정지", bg="#616161", fg="white", font=("맑은 고딕", 10, "bold"), width=8,
+                  command=lambda: self.send("DEV", "DRIVE", "STOP")).pack(side="left", padx=4)
+        self.drive_lbl = ttk.Label(run, text="대기", width=18)
+        self.drive_lbl.pack(side="left", padx=4)
+        ttk.Label(f, text="속도 (0.2~1.0)").grid(row=1, column=0, columnspan=3, sticky="w", padx=4)
         self.speed = tk.DoubleVar(value=DEFAULT_DRIVE_SPEED)
         s = tk.Scale(f, from_=SPEED_RANGE[0], to=SPEED_RANGE[1], resolution=0.05, orient="horizontal",
                      variable=self.speed, length=200)
-        s.grid(row=0, column=0, columnspan=3, sticky="w", padx=4)
+        s.grid(row=2, column=0, columnspan=3, sticky="w", padx=4)
         s.bind("<ButtonRelease-1>", lambda e: self._send_speed())
         for i, (text, step) in enumerate((("−", -0.05), ("+", 0.05))):
-            ttk.Button(f, text=text, width=3, command=lambda st=step: self._nudge_speed(st)).grid(row=1, column=i, padx=2, pady=2)
-        ttk.Label(f, text="놓으면 적용 · 주행 중에도", foreground="gray").grid(row=1, column=2, sticky="w")
+            ttk.Button(f, text=text, width=3, command=lambda st=step: self._nudge_speed(st)).grid(row=3, column=i, padx=2, pady=2)
+        ttk.Label(f, text="놓으면 적용 · 주행 중에도", foreground="gray").grid(row=3, column=2, sticky="w")
         return f
+
+    def _start_drive(self):
+        """카메라를 LINE 자세로 내리고 0.5초 뒤(자세 안정) 출발. 멈춤: 정지 버튼·Space·정지선·코너·라인 끝."""
+        if not self.send("DEV", "POSE", "LINE"):
+            return
+        self.drive_lbl.config(text="출발 준비…", foreground="#f57c00")
+        self.after(500, lambda: self.send("DEV", "DRIVE", "FOLLOW"))
 
     def _nudge_speed(self, step):
         lo, hi = SPEED_RANGE
@@ -283,6 +299,11 @@ class DevTab(ttk.Frame):
             self.line_lbl.config(text=f"오프셋 {r['offset']:+.2f}   각도 {ang}\n이벤트 {r['event']}   (판정 {raw})")
         elif kind == "SYS":
             self.sys_lbl.config(text=f"온도 {r['temp']:.1f}℃ / CPU {r['cpu']:.0f}% / 메모리 {r['mem']:.0f}%")
+        elif kind == "DRIVE":
+            text, color = {"RUNNING": ("주행 중", "#2e7d32"), "DONE": (f"끝: {r['result']}", "black"),
+                           "REJECTED": (f"거부: {r['result']}", "#d32f2f")}.get(r["state"], (r["state"], "black"))
+            self.drive_lbl.config(text=text, foreground=color)
+            self.log("SYS", f"라인 주행 {text}")
         elif kind == "NODES":
             self.nodes.delete(0, "end")
             for n in r["nodes"]:

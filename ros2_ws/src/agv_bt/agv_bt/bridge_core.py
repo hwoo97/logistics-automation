@@ -2,7 +2,8 @@
 
 출력은 io 객체의 메서드로 내보낸다 (노드는 이를 ROS 토픽 발행으로 연결, 시험은 가짜 io로 확인).
   io.send(line) / io.estop(bool) / io.cmd_vel(v, w) / io.led(state) / io.pose(name)
-  io.servo(pan, tilt) / io.wheels([l1..l4]) / io.speed(v) / io.node_names() -> list / io.mission(cmd)
+  io.servo(pan, tilt) / io.wheels([l1..l4]) / io.speed(v) / io.drive("FOLLOW"|"STOP") / io.node_names() -> list
+  io.mission(cmd)
 
 standalone=True : mission_node가 없는 단위 개발 단계. 상태(IDLE·MANUAL·ESTOP)를 브리지가 직접 관리한다.
 standalone=False: 작업 명령은 mission_node로 넘기고 상태는 /mission/status를 따른다 (agv_interfaces 작성 후 사용).
@@ -21,8 +22,12 @@ class BridgeCore:
         self.done, self.total, self.cargo, self.target = 0, 0, "NONE", "NONE"
         self.watches: set[str] = set()
         self.link_lost = False
+        self.driving = False                 # DEV DRIVE FOLLOW로 drive_node가 주행 중 (노드가 set_driving으로 알림)
 
     # ── 상태 ─────────────────────────────────────────────
+
+    def set_driving(self, on: bool) -> None:
+        self.driving = on
 
     def status_line(self) -> str:
         return format_status(self.state, self.done, self.total, self.cargo, self.target)
@@ -74,6 +79,8 @@ class BridgeCore:
         if cmd.kind == "STOP":                      # 상태와 무관하게 즉시 (최우선)
             self.io.estop(True)
         reason = check_allowed(cmd, self.state)
+        if not reason and self.driving and cmd.key in ("MANUAL ON", "DEV WHEEL", "DEV DRIVE")                 and cmd.args[-1:] != ["STOP"]:
+            reason = "라인 주행 중 — DEV DRIVE STOP 먼저"           # /cmd_vel·바퀴 명령이 겹치지 않게
         if reason:
             self.io.send(format_nak(cmd.key, reason))
             return
@@ -120,6 +127,8 @@ class BridgeCore:
             self.io.wheels([float(v) for v in rest])
         elif sub == "SPEED":
             self.io.speed(float(rest[0]))
+        elif sub == "DRIVE":
+            self.io.drive(rest[0])
         elif sub == "WATCH":
             keys = WATCH_KEYS if rest[0] == "ALL" else (rest[0],)
             for k in keys:
