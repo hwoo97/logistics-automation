@@ -35,7 +35,9 @@ class LineConfig:
     min_pixels: int = 60                # 가까운 띠에 이보다 적으면 라인 없음
     column_fill: float = 0.4            # 띠 높이의 몇 % 이상 검으면 그 열을 "검은 열"로 봄
     edge_ratio: float = 0.05            # 화면 양끝 몇 % 안에 닿으면 "끝까지"
-    stop_line_width_ratio: tuple = (2.0, 5.0)   # 정지선 = 가로 폭이 라인 굵기의 2~5배
+    stop_line_width_ratio: tuple = (2.0, 8.0)   # 정지선 = 가로 폭이 라인 굵기의 2~8배 (10cm ÷ 19mm ≈ 5.3배라 5배에서 늘림)
+    stop_min_thickness: float = 0.8     # 정지선 세로 두께 ≥ 라인 굵기 × 이 값 — 바닥의 얇은 줄눈·자국 제외
+                                        #   (정지선은 40~50mm 테이프로 라인 19mm보다 두꺼움, 원근으로 세로는 줄어 보임)
     ahead_center_ratio: float = 0.4     # 먼 띠에서 가운데 ±40% 안의 세로 라인 = 앞쪽 라인
     default_line_px: int = 20           # 라인 굵기 추정이 안 될 때
     max_line_px: int = 45               # 한 줄에서 이보다 넓은 검은 구간은 라인이 아님 (두꺼운 물체, 붙은 물체)
@@ -119,13 +121,13 @@ class LineDetector:
             raw = LineEvent.LINE_END
             return LineResult(round(self.offset, 3), False, self.confirm.push(raw), raw)
         line = np.where(labels == line_id, 255, 0).astype(np.uint8)   # 고른 라인 + 이어진 갈래만
-        far, mid, near = line[: h // 3], line[h // 3: 2 * h // 3], line[2 * h // 3:]
+        near = line[2 * h // 3:]                                # 오프셋은 가까운 띠, 이벤트는 detect_event가 전체에서
         centered = self.center_offset(near)
         if centered is None:                                  # 가까운 띠가 전부 두꺼움 (물체에 덮임)
             raw = LineEvent.LINE_END
             return LineResult(round(self.offset, 3), False, self.confirm.push(raw), raw)
         self.offset, self.line_px = centered
-        raw = self.detect_event(mid, far, self.line_px)
+        raw = self.detect_event(line, self.line_px)
         angle = self.line_angle(line)
         return LineResult(round(self.offset, 3), True, self.confirm.push(raw), raw,
                           round(angle, 1) if angle is not None else 90.0, angle is not None)
@@ -208,10 +210,12 @@ class LineDetector:
         offset = float(np.clip((np.mean(centers) - c.width / 2) / (c.width / 2), -1.0, 1.0))
         return offset, float(np.median(widths))
 
-    def detect_event(self, mid, far, line_px) -> LineEvent:
+    def detect_event(self, line: np.ndarray, line_px: float) -> LineEvent:
         """F4 판단표 — 고른 라인과 이어진 영역에서 중간 띠의 가로 폭·양끝 도달, 먼 띠의 앞쪽 라인.
         갈림길은 마커 인식이 맡으므로 T자·옆 갈래 모양은 NONE."""
         c = self.cfg
+        h = line.shape[0]
+        far, mid = line[: h // 3], line[h // 3: 2 * h // 3]
         w = mid.shape[1]
         edge = max(1, int(w * c.edge_ratio))
         spans = _spans(_black_columns(mid, c.column_fill))
@@ -229,6 +233,19 @@ class LineDetector:
             return LineEvent.CORNER_LEFT
         if right:
             return LineEvent.CORNER_RIGHT
-        if lo * line_px <= width <= hi * line_px:
+        if lo * line_px <= width <= hi * line_px and self._is_stop_line(line, widest, line_px):
             return LineEvent.STOP_LINE
         return LineEvent.NONE
+
+    def _is_stop_line(self, line: np.ndarray, span: tuple, line_px: float) -> bool:
+        """가로 검은 영역이 정지선인지 — ① 라인의 왼쪽·오른쪽에 모두 걸침 ② 라인 바깥 부분의 세로 두께가
+        라인 굵기 × stop_min_thickness 이상 (2026-10-30 S1: 바닥의 얇은 가로선이 정지선으로 잡힘)."""
+        c = self.cfg
+        a, b = span
+        line_x = (self.offset + 1) * c.width / 2
+        keep_out = 1.5 * line_px                                   # 세로 라인이 지나가는 열은 두께에서 뺌
+        if a > line_x - keep_out or b < line_x + keep_out:          # 한쪽에만 붙은 자국
+            return False
+        cols = [x for x in range(a, b + 1) if abs(x - line_x) > keep_out]
+        thickness = float(np.median((line[:, cols] > 0).sum(axis=0)))
+        return thickness >= c.stop_min_thickness * line_px

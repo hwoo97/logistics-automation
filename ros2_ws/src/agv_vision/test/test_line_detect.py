@@ -7,7 +7,8 @@ from agv_vision.line_detect import EventConfirmer, LineConfig, LineDetector
 
 W, H, LW = 320, 240, 20           # 라인 굵기 20px
 TOP = 160                          # 관심 영역 시작 행 → 먼 띠 160~185, 중간 186~212, 가까운 띠 213~239
-MID_Y = (192, 206)                 # 중간 띠 안의 가로 라인
+MID_Y = (192, 206)                 # 중간 띠 안의 가로 라인 (코너·갈래, 라인 테이프 굵기)
+STOP_Y = (188, 212)                # 정지선 — 40~50mm 테이프라 라인보다 두꺼움 (24px)
 
 
 def floor():
@@ -82,8 +83,35 @@ def test_junctions_are_left_to_markers(make):
 def test_stop_line():
     img = floor()
     vline(img, 160)
-    hline(img, 110, 210)                  # 폭 100px = 라인 굵기 5배 이내
+    hline(img, 110, 210, STOP_Y)          # 폭 100px = 라인 굵기 5배, 두께 24px
     assert run(img).event == LineEvent.STOP_LINE
+
+
+def test_wide_stop_line_up_to_8x():
+    """10cm 정지선 ÷ 19mm 라인 ≈ 5.3배 — 이전 기준(5배)에선 놓쳤음."""
+    img = floor()
+    vline(img, 160)
+    hline(img, 85, 235, STOP_Y)           # 150px = 7.5배
+    assert run(img).event == LineEvent.STOP_LINE
+
+
+@pytest.mark.parametrize("thick", [6, 12, 14])
+def test_thin_floor_line_is_not_stop_line(thick):
+    """바닥의 얇은 가로선(줄눈·자국)이 라인을 가로질러도 정지선 아님 (2026-10-30 S1).
+    6px은 이전에도 걸러짐(중간 띠 40% 조건). 12·14px은 그 조건을 넘지만 라인(20px)보다 얇음 — 실제로 잡히던 경우."""
+    img = floor()
+    vline(img, 160)
+    img[196:196 + thick, 115:205] = 25         # 폭 90px — 이전 기준(2~5배) 안
+    r = run(img)
+    assert r.raw_event == LineEvent.NONE and r.event == LineEvent.NONE
+
+
+def test_one_sided_mark_is_not_stop_line():
+    """라인 한쪽에만 붙은 두꺼운 자국 — 정지선은 라인 양쪽으로 걸쳐야 함."""
+    img = floor()
+    vline(img, 160)
+    hline(img, 160, 250, STOP_Y)
+    assert run(img).raw_event == LineEvent.NONE
 
 
 def test_line_end():
@@ -171,7 +199,7 @@ def test_thick_object_does_not_inflate_line_width():
         det.process(img)
     stop = floor()
     vline(stop, 160)
-    hline(stop, 110, 210)
+    hline(stop, 110, 210, STOP_Y)
     for _ in range(3):
         r = det.process(stop)
     assert r.event == LineEvent.STOP_LINE and det.line_px <= LineConfig().max_line_px

@@ -51,7 +51,8 @@ line_node:
     min_pixels: 60
     column_fill: 0.4
     edge_ratio: 0.05
-    stop_line_width_ratio: [2.0, 5.0]
+    stop_line_width_ratio: [2.0, 8.0]   # 정지선 가로 폭 = 라인 굵기의 2~8배
+    stop_min_thickness: 0.8     # 정지선 세로 두께 ≥ 라인 굵기 × 0.8 (얇은 바닥 선 제외) — 진짜 정지선을 놓치면 낮춤
     ahead_center_ratio: 0.4
     default_line_px: 20
     angle_min_rows: 15          # 라인 각도를 믿으려면 따라간 줄이 이만큼 필요

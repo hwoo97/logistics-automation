@@ -22,6 +22,7 @@ class LineNode(Node):
             column_fill=p("column_fill", d.column_fill).value,
             edge_ratio=p("edge_ratio", d.edge_ratio).value,
             stop_line_width_ratio=tuple(p("stop_line_width_ratio", list(d.stop_line_width_ratio)).value),
+            stop_min_thickness=p("stop_min_thickness", d.stop_min_thickness).value,
             ahead_center_ratio=p("ahead_center_ratio", d.ahead_center_ratio).value,
             default_line_px=p("default_line_px", d.default_line_px).value,
             max_line_px=p("max_line_px", d.max_line_px).value,
