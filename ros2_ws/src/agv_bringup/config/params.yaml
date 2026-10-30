@@ -54,6 +54,9 @@ line_node:
     stop_line_width_ratio: [2.0, 5.0]
     ahead_center_ratio: 0.4
     default_line_px: 20
+    center_weight_min: 0.3      # 라인 고르기: 가운데 1.0 → 양끝 0.3 (주변 어두운 물체 대신 가운데 라인)
+    prev_weight_min: 0.5        # 직전 라인 위치에서 멀수록 낮춤
+    bottom_bonus: 1.5           # 화면 맨 아래(차량 바로 앞)에 닿는 덩어리 가산
     confirm_frames: 3           # S1~S3에서 사진·주행으로 보정
 
 bt_bridge_node:

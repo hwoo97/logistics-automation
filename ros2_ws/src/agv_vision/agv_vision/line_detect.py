@@ -1,9 +1,15 @@
 """라인 검출 (② 순수 로직) — BGR 영상 → 오프셋·이벤트 (functional_design F4, class_design 2.1·2.2).
 
-처리: 320×240 축소 → 아래쪽 roi_ratio 관심 영역 → 검정 마스크 → 띠 3개
-  가까운 띠(아래): 라인 중심 → 오프셋 -1(왼쪽) ~ 1(오른쪽), 라인 굵기 추정
-  중간 띠       : 가로 검은 영역 — 폭·화면 양끝 도달 → 정지선·분기점·코너
-  먼 띠(위)     : 가운데 쪽 세로 라인 = "앞쪽 라인 있음"
+처리: 320×240 축소 → 아래쪽 roi_ratio 관심 영역 → 검정 마스크 → 연결 성분 → 띠 3개
+  라인 고르기  : 가까운 띠에 걸친 덩어리 중 점수 = 면적(행마다 라인 굵기 2배까지만) × 가운데 가중치 × 직전 위치 가중치
+                × (화면 맨 아래에 닿으면 가산)
+                → 주변의 어두운 물체보다 차량 밑에서 들어오는 가운데 라인을 고른다
+  가까운 띠(아래): 고른 라인의 중심 → 오프셋 -1(왼쪽) ~ 1(오른쪽), 라인 굵기 추정
+  중간 띠       : 고른 라인과 **이어진** 가로 검은 영역 — 폭·화면 양끝 도달 → 정지선·코너
+  먼 띠(위)     : 고른 라인과 이어진 가운데 쪽 세로 라인 = "앞쪽 라인 있음"
+  (가중치는 라인 고르기에만 — 코너 라인은 화면 끝까지 뻗어야 하므로 이벤트는 "이어져 있는지"로 거른다)
+  갈림길(분기점)은 판정하지 않는다 → 색 마커 인식이 맡음 (2026-10-30 결정). T자·옆 갈래 모양은 NONE,
+  마커를 놓쳐 T자에서 라인이 끊기면 LINE_END로 멈춘다.
 검정 = 어둡고(V가 Otsu 문턱 이하) + 색이 없음(S가 낮음) → 빨강·파랑 마커가 라인으로 잡히지 않게.
 같은 이벤트가 confirm_frames번 연속일 때만 확정(EventConfirmer).
 """
@@ -28,6 +34,9 @@ class LineConfig:
     stop_line_width_ratio: tuple = (2.0, 5.0)   # 정지선 = 가로 폭이 라인 굵기의 2~5배
     ahead_center_ratio: float = 0.4     # 먼 띠에서 가운데 ±40% 안의 세로 라인 = 앞쪽 라인
     default_line_px: int = 20           # 라인 굵기 추정이 안 될 때
+    center_weight_min: float = 0.3      # 라인 고르기 가중치: 가운데 1.0 → 화면 양끝 이 값
+    prev_weight_min: float = 0.5        # 직전 라인 위치에서 화면 폭 절반만큼 떨어지면 이 값
+    bottom_bonus: float = 1.5           # 화면 맨 아래(차량 바로 앞)에 닿는 덩어리 가산
     confirm_frames: int = 3
 
 
@@ -88,6 +97,7 @@ class LineDetector:
         self.cfg = cfg or LineConfig()
         self.confirm = EventConfirmer(self.cfg.confirm_frames)
         self.offset = 0.0
+        self.line_px = float(self.cfg.default_line_px)     # 직전 라인 굵기 (넓은 물체 면적 제한에 사용)
 
     def process(self, bgr: np.ndarray) -> LineResult:
         c = self.cfg
@@ -95,41 +105,56 @@ class LineDetector:
         roi = img[int(c.height * (1 - c.roi_ratio)):, :]
         mask = black_mask(roi, c)
         h = mask.shape[0]
-        far, mid, near = mask[: h // 3], mask[h // 3: 2 * h // 3], mask[2 * h // 3:]
+        _, labels = cv2.connectedComponents(mask, connectivity=8)
+        line_id = self.select_line(labels, h)
+        if line_id is None:                                   # 주변 물체만 있거나 아무것도 없음
+            raw = LineEvent.LINE_END
+            return LineResult(round(self.offset, 3), False, self.confirm.push(raw), raw)
+        line = np.where(labels == line_id, 255, 0).astype(np.uint8)   # 고른 라인 + 이어진 갈래만
+        far, mid, near = line[: h // 3], line[h // 3: 2 * h // 3], line[2 * h // 3:]
+        self.offset, self.line_px = self.center_offset(near)
+        raw = self.detect_event(mid, far, self.line_px)
+        return LineResult(round(self.offset, 3), True, self.confirm.push(raw), raw)
 
-        found, offset, line_px = self.center_offset(near)
-        if found:
-            self.offset = offset
-        raw = self.detect_event(mid, far, near, line_px, found)
-        return LineResult(round(self.offset, 3), found, self.confirm.push(raw), raw)
-
-    def center_offset(self, near: np.ndarray) -> tuple[bool, float, float]:
-        """(라인 있음, 오프셋, 라인 굵기 px). 가장 큰 덩어리 중 이전 위치에 가까운 것을 쓴다."""
+    def select_line(self, labels: np.ndarray, h: int) -> int | None:
+        """가까운 띠에 걸친 덩어리 중 라인 하나. 점수 = 면적(행마다 라인 굵기 2배까지만) × 가운데 가중치
+        × 직전 위치 가중치 × 아래 닿음 가산 — 넓은 어두운 물체가 면적만으로 이기지 못하게."""
         c = self.cfg
-        n, labels, stats, cents = cv2.connectedComponentsWithStats(near)
+        near = labels[2 * h // 3:]
+        half = c.width / 2
+        prev_x = (self.offset + 1) * half
+        cap = 2 * max(self.line_px, c.default_line_px)
         best = None
-        prev_x = (self.offset + 1) * c.width / 2
-        for i in range(1, n):
-            area = stats[i, cv2.CC_STAT_AREA]
-            if area < c.min_pixels:
+        for i in np.unique(near):
+            if i == 0:
                 continue
-            score = area - abs(cents[i][0] - prev_x)       # 크고 이전 위치에 가까울수록
+            ys, xs = np.nonzero(near == i)
+            if len(xs) < c.min_pixels:
+                continue
+            cx = xs.mean()
+            w_center = 1.0 - (1.0 - c.center_weight_min) * min(1.0, abs(cx - half) / half)
+            w_prev = 1.0 - (1.0 - c.prev_weight_min) * min(1.0, abs(cx - prev_x) / half)
+            bonus = c.bottom_bonus if ys.max() >= near.shape[0] - 2 else 1.0
+            area = np.minimum(np.bincount(ys), cap).sum()          # 행마다 cap까지만 셈
+            score = area * w_center * w_prev * bonus
             if best is None or score > best[0]:
-                best = (score, i)
-        if best is None:
-            return False, self.offset, c.default_line_px
-        i = best[1]
-        cx = cents[i][0]
-        line_px = stats[i, cv2.CC_STAT_AREA] / max(1, stats[i, cv2.CC_STAT_HEIGHT])
-        return True, float(np.clip((cx - c.width / 2) / (c.width / 2), -1.0, 1.0)), float(line_px)
+                best = (score, int(i))
+        return None if best is None else best[1]
 
-    def detect_event(self, mid, far, near, line_px, near_found) -> LineEvent:
-        """F4 판단표 — 중간 띠의 가로 폭·양끝 도달, 먼 띠의 앞쪽 라인."""
+    def center_offset(self, near: np.ndarray) -> tuple[float, float]:
+        """고른 라인(가까운 띠)의 (오프셋, 라인 굵기 px)."""
+        c = self.cfg
+        ys, xs = np.nonzero(near)
+        rows = max(1, len(np.unique(ys)))
+        offset = float(np.clip((xs.mean() - c.width / 2) / (c.width / 2), -1.0, 1.0))
+        return offset, len(xs) / rows
+
+    def detect_event(self, mid, far, line_px) -> LineEvent:
+        """F4 판단표 — 고른 라인과 이어진 영역에서 중간 띠의 가로 폭·양끝 도달, 먼 띠의 앞쪽 라인.
+        갈림길은 마커 인식이 맡으므로 T자·옆 갈래 모양은 NONE."""
         c = self.cfg
         w = mid.shape[1]
         edge = max(1, int(w * c.edge_ratio))
-        if not near_found and not (mid > 0).any() and not (far > 0).any():
-            return LineEvent.LINE_END
         spans = _spans(_black_columns(mid, c.column_fill))
         if not spans:
             return LineEvent.NONE
@@ -139,12 +164,12 @@ class LineDetector:
         ahead = any(abs((a + b) / 2 - w / 2) <= w * c.ahead_center_ratio and (b - a + 1) < 3 * line_px
                     for a, b in _spans(_black_columns(far, c.column_fill)))
         lo, hi = c.stop_line_width_ratio
-        if left and right:
-            return LineEvent.NONE if ahead else LineEvent.JUNCTION_T      # 십자는 트랙에 없음
+        if left and right or (left or right) and ahead:        # T자·옆 갈래 = 갈림길 → 마커 인식
+            return LineEvent.NONE
         if left:
-            return LineEvent.JUNCTION_LEFT if ahead else LineEvent.CORNER_LEFT
+            return LineEvent.CORNER_LEFT
         if right:
-            return LineEvent.JUNCTION_RIGHT if ahead else LineEvent.CORNER_RIGHT
+            return LineEvent.CORNER_RIGHT
         if lo * line_px <= width <= hi * line_px:
             return LineEvent.STOP_LINE
         return LineEvent.NONE

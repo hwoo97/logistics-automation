@@ -24,6 +24,9 @@ class LineNode(Node):
             stop_line_width_ratio=tuple(p("stop_line_width_ratio", list(d.stop_line_width_ratio)).value),
             ahead_center_ratio=p("ahead_center_ratio", d.ahead_center_ratio).value,
             default_line_px=p("default_line_px", d.default_line_px).value,
+            center_weight_min=p("center_weight_min", d.center_weight_min).value,
+            prev_weight_min=p("prev_weight_min", d.prev_weight_min).value,
+            bottom_bonus=p("bottom_bonus", d.bottom_bonus).value,
             confirm_frames=p("confirm_frames", d.confirm_frames).value,
         )
         self.enabled = p("enabled", True).value

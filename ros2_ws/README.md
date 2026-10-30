@@ -9,7 +9,7 @@
 | `agv_hw` | 드라이버(모터 DRV8835·서보 PCA9685·초음파·LED, 가짜 포함) + 노드 `motor_node` `pantilt_node` `ultrasonic_node` `led_node` | pytest 21 (모터 드라이버 4 포함) |
 | `agv_bt` | `RfcommServer`, `BridgeCore`(명령 판단), `VideoStreamer`, `SysMonitor` + 노드 `bt_bridge_node` | pytest 14 (RfcommServer 4 포함) |
 | `agv_interfaces` | 메시지 `LineState` (offset, line_found, event, raw_event) — Status·Command·Drive는 상태 머신 작업 때 | — |
-| `agv_vision` | `LineDetector`(검정 = 어둡고 색 없음, 띠 3개로 오프셋·이벤트, 3프레임 확인) + 노드 `line_node` | pytest 15 (합성 트랙 사진) |
+| `agv_vision` | `LineDetector`(검정 = 어둡고 색 없음, 가운데·직전 위치·아래 닿음 가중치로 라인 고르기, 이어진 영역만으로 이벤트, 3프레임 확인) + 노드 `line_node` | pytest 21 (합성 트랙 사진) |
 | `agv_bringup` | `launch/s0_hw.launch.py`, `launch/s1_line.launch.py`(S0 + line_node), `config/params.yaml` | — |
 
 ## 빌드 (Pi)
