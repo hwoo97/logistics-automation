@@ -61,6 +61,7 @@ line_node:
     prev_weight_min: 0.5        # 직전 라인 위치에서 멀수록 낮춤
     bottom_bonus: 1.5           # 화면 맨 아래(차량 바로 앞)에 닿는 덩어리 가산
     confirm_frames: 3           # S1~S3에서 사진·주행으로 보정
+    line_end_frames: 10         # 라인 끝만 더 오래 확인 (잠깐 놓친 것을 끝으로 보지 않게) — 진짜 끝에서 너무 늦게 서면 낮춤
 
 drive_node:
   ros__parameters:

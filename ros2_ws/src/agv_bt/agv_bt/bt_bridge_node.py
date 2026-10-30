@@ -16,7 +16,7 @@ from agv_bt.bridge_core import BridgeCore
 from agv_bt.rfcomm_server import RfcommServer
 from agv_bt.sysinfo import SysMonitor
 from agv_bt.video_streamer import VideoStreamer
-from agv_protocol.messages import format_dev
+from agv_protocol.messages import LINE_TUNE_KEYS, format_dev
 
 WATCH_PERIOD_S = 0.2            # RANGE·LINE 5Hz
 
@@ -49,6 +49,7 @@ class BtBridgeNode(Node):
         self.pub_wheels = self.create_publisher(Float32MultiArray, "/dev/wheels", QoSProfile(depth=1))
         self.pub_speed = self.create_publisher(Float32, "/drive/speed", q10)
         self.pub_tune = self.create_publisher(String, "/drive/tune", q10)
+        self.pub_line_tune = self.create_publisher(String, "/line/tune", q10)
         self.create_subscription(Range, "/ultrasonic/range", self.on_range, qos_profile_sensor_data)
         self.create_subscription(Image, camera_topic, self.on_image, qos_profile_sensor_data)
         try:                                                  # agv_interfaces가 없으면 LINE만 빠짐
@@ -105,7 +106,11 @@ class BtBridgeNode(Node):
         self.pub_speed.publish(Float32(data=float(value)))
 
     def tune(self, key, value):
-        self.pub_tune.publish(String(data=f"{key} {float(value)}"))
+        """DEV TUNE — 프레임 수는 line_node(/line/tune), 회전 세기·라인 기준은 drive_node(/drive/tune)."""
+        if key in LINE_TUNE_KEYS:
+            self.pub_line_tune.publish(String(data=f"{key} {int(value)}"))
+        else:
+            self.pub_tune.publish(String(data=f"{key} {float(value)}"))
 
     def drive(self, action):
         """DEV DRIVE FOLLOW|STOP — drive_node에 FOLLOW_TO_EVENT 목표를 보내거나 취소. 결과는 DEV DRIVE로 알림."""

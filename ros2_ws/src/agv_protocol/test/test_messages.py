@@ -22,6 +22,8 @@ from agv_protocol.types import Cargo, State, Target
     ("DEV DRIVE STOP", "DEV", ["DRIVE", "STOP"]),
     ("DEV tune turn 0.6", "DEV", ["TUNE", "TURN", "0.6"]),
     ("DEV TUNE CENTER -0.1", "DEV", ["TUNE", "CENTER", "-0.1"]),
+    ("DEV tune confirm 3", "DEV", ["TUNE", "CONFIRM", "3"]),
+    ("DEV TUNE LINE_END 10", "DEV", ["TUNE", "LINE_END", "10"]),
 ])
 def test_parse_valid(line, kind, args):
     cmd = parse_command(line)
@@ -35,6 +37,7 @@ def test_parse_valid(line, kind, args):
     "DEV SPEED", "DEV SPEED 0.1", "DEV SPEED 1.5", "DEV SPEED fast", "DEV SPEED 0.5 0.5",
     "DEV DRIVE", "DEV DRIVE GO", "DEV DRIVE FOLLOW STOP",
     "DEV TUNE", "DEV TUNE TURN", "DEV TUNE KP 1", "DEV TUNE TURN 2", "DEV TUNE CENTER -0.7", "DEV TUNE TURN x",
+    "DEV TUNE CONFIRM 0", "DEV TUNE CONFIRM 2.5", "DEV TUNE LINE_END 2", "DEV TUNE LINE_END 31",
 ])
 def test_parse_invalid(line):
     with pytest.raises(ValueError):

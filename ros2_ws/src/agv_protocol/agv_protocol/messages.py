@@ -39,8 +39,12 @@ ALLOWED_STATES = {
 WATCH_KEYS = ("RANGE", "LINE", "SYS")
 SPEED_RANGE = (0.2, 1.0)        # DEV SPEED — drive_node 기본 선속도
 DRIVE_ACTIONS = ("FOLLOW", "STOP")      # DEV DRIVE — 시험용 라인 주행 시작·정지
-TUNE_RANGES = {"TURN": (0.1, 1.5),      # DEV TUNE — 회전 세기 (회전량 전체에 곱함)
-               "CENTER": (-0.5, 0.5)}   #            라인 기준 위치 (오프셋 목표, 음수 = 화면 왼쪽)
+TUNE_RANGES = {"TURN": (0.1, 1.5),      # DEV TUNE — 회전 세기 (회전량 전체에 곱함)            → drive_node
+               "CENTER": (-0.5, 0.5),   #            라인 기준 위치 (오프셋 목표, 음수 = 화면 왼쪽) → drive_node
+               "CONFIRM": (1, 10),      #            정지선·코너 확정 프레임 수 (정수)          → line_node
+               "LINE_END": (3, 30)}     #            라인 끝 확정 프레임 수 (정수)              → line_node
+TUNE_INT_KEYS = ("CONFIRM", "LINE_END")
+LINE_TUNE_KEYS = ("CONFIRM", "LINE_END")       # 브리지가 /line/tune으로, 나머지는 /drive/tune으로
 
 
 @dataclass
@@ -106,7 +110,9 @@ def _validate_dev(cmd: Command) -> None:
         if len(rest) != 2 or rest[0].upper() not in TUNE_RANGES:
             raise ValueError(f"DEV TUNE: <{'|'.join(TUNE_RANGES)}> <값>")
         cmd.args[1] = rest[0].upper()
-        _number(rest[1], *TUNE_RANGES[cmd.args[1]], cmd.args[1].lower())
+        value = _number(rest[1], *TUNE_RANGES[cmd.args[1]], cmd.args[1].lower())
+        if cmd.args[1] in TUNE_INT_KEYS and value != int(value):
+            raise ValueError(f"DEV TUNE {cmd.args[1]}: 정수 필요 ({rest[1]})")
     elif sub == "WATCH":
         if len(rest) != 2 or rest[0] not in (*WATCH_KEYS, "ALL") or rest[1] not in ("ON", "OFF"):
             raise ValueError("DEV WATCH: <RANGE|LINE|SYS|ALL> <ON|OFF>")

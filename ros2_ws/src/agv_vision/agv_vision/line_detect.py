@@ -46,6 +46,7 @@ class LineConfig:
     prev_weight_min: float = 0.5        # 직전 라인 위치에서 화면 폭 절반만큼 떨어지면 이 값
     bottom_bonus: float = 1.5           # 화면 맨 아래(차량 바로 앞)에 닿는 덩어리 가산
     confirm_frames: int = 3
+    line_end_frames: int = 10           # 라인 끝만 더 오래 확인 — 흔들림·반사로 잠깐 놓친 것을 끝으로 보지 않게 (2026-10-30 S1)
 
 
 @dataclass
@@ -59,17 +60,19 @@ class LineResult:
 
 
 class EventConfirmer:
-    """같은 이벤트가 frames번 연속이면 그 이벤트, 아니면 NONE."""
+    """같은 이벤트가 frames번 연속이면 그 이벤트, 아니면 NONE. per_event로 이벤트별 횟수를 따로 줄 수 있음."""
 
-    def __init__(self, frames: int = 3):
+    def __init__(self, frames: int = 3, per_event: dict | None = None):
         self.frames = frames
+        self.per_event = per_event or {}
         self.last = LineEvent.NONE
         self.count = 0
 
     def push(self, event: LineEvent) -> LineEvent:
         self.count = self.count + 1 if event == self.last else 1
         self.last = event
-        return event if event != LineEvent.NONE and self.count >= self.frames else LineEvent.NONE
+        need = self.per_event.get(event, self.frames)
+        return event if event != LineEvent.NONE and self.count >= need else LineEvent.NONE
 
 
 def black_mask(bgr: np.ndarray, cfg: LineConfig) -> np.ndarray:
@@ -105,9 +108,19 @@ def _spans(cols: np.ndarray) -> list[tuple[int, int]]:
 class LineDetector:
     def __init__(self, cfg: LineConfig | None = None):
         self.cfg = cfg or LineConfig()
-        self.confirm = EventConfirmer(self.cfg.confirm_frames)
+        self.confirm = EventConfirmer(self.cfg.confirm_frames, {LineEvent.LINE_END: self.cfg.line_end_frames})
         self.offset = 0.0
         self.line_px = float(self.cfg.default_line_px)     # 직전 라인 굵기 (정지선 폭 기준)
+
+    def set_frames(self, key: str, frames: int) -> None:
+        """노트북 앱 조정 (DEV TUNE) — CONFIRM: 정지선·코너 확정 프레임, LINE_END: 라인 끝 확정 프레임."""
+        frames = int(frames)
+        if key == "CONFIRM":
+            self.cfg.confirm_frames = self.confirm.frames = frames
+        elif key == "LINE_END":
+            self.cfg.line_end_frames = self.confirm.per_event[LineEvent.LINE_END] = frames
+        else:
+            raise ValueError(f"모르는 프레임 항목: {key}")
 
     def process(self, bgr: np.ndarray) -> LineResult:
         c = self.cfg
@@ -117,20 +130,36 @@ class LineDetector:
         h = mask.shape[0]
         _, labels = cv2.connectedComponents(mask, connectivity=8)
         line_id = self.select_line(labels, h)
-        if line_id is None:                                   # 주변 물체만 있거나 아무것도 없음
-            raw = LineEvent.LINE_END
-            return LineResult(round(self.offset, 3), False, self.confirm.push(raw), raw)
+        if line_id is None:                                   # 가까운 띠에 라인 없음 (주변 물체만 있거나 아무것도 없음)
+            return self._lost(mask)
         line = np.where(labels == line_id, 255, 0).astype(np.uint8)   # 고른 라인 + 이어진 갈래만
         near = line[2 * h // 3:]                                # 오프셋은 가까운 띠, 이벤트는 detect_event가 전체에서
         centered = self.center_offset(near)
         if centered is None:                                  # 가까운 띠가 전부 두꺼움 (물체에 덮임)
-            raw = LineEvent.LINE_END
-            return LineResult(round(self.offset, 3), False, self.confirm.push(raw), raw)
+            return self._lost(mask)
         self.offset, self.line_px = centered
         raw = self.detect_event(line, self.line_px)
         angle = self.line_angle(line)
         return LineResult(round(self.offset, 3), True, self.confirm.push(raw), raw,
                           round(angle, 1) if angle is not None else 90.0, angle is not None)
+
+    def _lost(self, mask: np.ndarray) -> LineResult:
+        """가까운 띠에서 라인을 못 찾음. 위쪽(중간·먼 띠)에 라인 모양이 보이면 잠깐 놓친 것(NONE),
+        관심 영역 어디에도 없으면 라인 끝(LINE_END, line_end_frames 연속이어야 확정). 오프셋은 마지막 값 유지."""
+        raw = LineEvent.NONE if self._line_above(mask) else LineEvent.LINE_END
+        return LineResult(round(self.offset, 3), False, self.confirm.push(raw), raw)
+
+    def _line_above(self, mask: np.ndarray) -> bool:
+        """중간·먼 띠에 가는 세로 구간(폭 ≤ max_line_px)이 angle_min_rows/2 줄 이상 이어진 덩어리가 있는지."""
+        c = self.cfg
+        upper = mask[: 2 * mask.shape[0] // 3]
+        n, labels = cv2.connectedComponents(upper, connectivity=8)
+        for i in range(1, n):
+            comp = labels == i
+            rows = sum(1 for y in range(comp.shape[0]) if self._thin_runs(comp[y], c.width / 2))
+            if rows >= max(3, c.angle_min_rows // 2):
+                return True
+        return False
 
     def line_angle(self, line: np.ndarray) -> float | None:
         """관심 영역 전체에서 라인을 아래→위로 따라가 직선을 맞춘 각도(도). 줄이 부족하면 None.

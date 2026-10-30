@@ -1,8 +1,10 @@
-"""line_node — /camera/image_raw(최신 1장) → LineDetector → /line/state (F4). 파라미터 enabled로 끄고 켬."""
+"""line_node — /camera/image_raw(최신 1장) → LineDetector → /line/state (F4). 파라미터 enabled로 끄고 켬.
+/line/tune(String "CONFIRM 3"·"LINE_END 10", 노트북 앱 DEV TUNE)으로 확정 프레임 수를 실행 중에 바꾼다."""
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import Image
+from std_msgs.msg import String
 
 from agv_bt.video_streamer import to_bgr
 from agv_interfaces.msg import LineState
@@ -31,6 +33,7 @@ class LineNode(Node):
             prev_weight_min=p("prev_weight_min", d.prev_weight_min).value,
             bottom_bonus=p("bottom_bonus", d.bottom_bonus).value,
             confirm_frames=p("confirm_frames", d.confirm_frames).value,
+            line_end_frames=p("line_end_frames", d.line_end_frames).value,
         )
         self.enabled = p("enabled", True).value
         self.detector = LineDetector(cfg)
@@ -38,6 +41,7 @@ class LineNode(Node):
                                          QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
         self.create_subscription(Image, p("camera_topic", "/camera/image_raw").value, self.on_image,
                                  qos_profile_sensor_data)
+        self.create_subscription(String, "/line/tune", self.on_tune, 10)
         self.add_on_set_parameters_callback(self.on_params)
         self.get_logger().info(f"line_node 시작 (enabled={self.enabled}, roi={cfg.roi_ratio})")
 
@@ -47,6 +51,16 @@ class LineNode(Node):
             if prm.name == "enabled":
                 self.enabled = bool(prm.value)
         return SetParametersResult(successful=True)
+
+    def on_tune(self, msg: String):
+        """노트북 앱 "확인 프레임"·"라인 끝 프레임" (DEV TUNE) — "CONFIRM 3", "LINE_END 10"."""
+        try:
+            key, value = msg.data.split()
+            self.detector.set_frames(key, int(float(value)))
+        except ValueError as e:
+            self.get_logger().warn(f"/line/tune 형식 오류 {msg.data!r}: {e}")
+            return
+        self.get_logger().info(f"조정 {key} = {int(float(value))}프레임")
 
     def on_image(self, msg: Image):
         if not self.enabled:

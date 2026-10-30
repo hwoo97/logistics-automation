@@ -50,7 +50,7 @@ class MainWindow:
         self.last_state = None
 
         root.title("물류 AGV 제어")
-        root.geometry("1180x800")
+        root.geometry("1180x880")
         root.minsize(1000, 700)
         self._build_bar(fake, addr or self.cfg.get("bt_address", ""))
         self.tabs = ttk.Notebook(root)

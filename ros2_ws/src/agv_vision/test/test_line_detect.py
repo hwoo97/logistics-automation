@@ -115,8 +115,43 @@ def test_one_sided_mark_is_not_stop_line():
 
 
 def test_line_end():
-    r = run(floor())
+    r = run(floor(), frames=LineConfig().line_end_frames)
     assert not r.line_found and r.event == LineEvent.LINE_END
+
+
+def test_line_end_needs_longer_confirmation():
+    """잠깐(3~9프레임) 라인을 놓친 것은 라인 끝이 아님 — 2026-10-30 S1: 주행 중 LINE_END로 멈췄다가 다시 출발하면 바로 따라감."""
+    det = LineDetector(LineConfig())
+    img = floor()
+    vline(img, 160)
+    for _ in range(3):
+        det.process(img)
+    events = [det.process(floor()).event for _ in range(9)]       # 9프레임 놓침 (30fps ≈ 0.3초)
+    assert all(e == LineEvent.NONE for e in events)
+    assert det.process(img).line_found                         # 다시 보이면 이어서
+    assert det.process(floor()).event == LineEvent.NONE        # 세는 것도 처음부터
+
+
+def test_set_frames_applies_immediately():
+    det = LineDetector(LineConfig())
+    det.set_frames("LINE_END", 4)
+    assert [det.process(floor()).event for _ in range(4)][-1] == LineEvent.LINE_END
+    det = LineDetector(LineConfig())
+    det.set_frames("CONFIRM", 1)
+    img = floor()
+    vline(img, 160)
+    hline(img, 110, 210, STOP_Y)
+    assert det.process(img).event == LineEvent.STOP_LINE      # 1프레임에 확정
+    with pytest.raises(ValueError):
+        det.set_frames("FPS", 5)
+
+
+def test_line_visible_above_is_not_line_end():
+    """가까운 띠에서만 놓치고 위쪽에 라인이 보이면 잠깐 놓친 것 — 라인 끝으로 세지 않음."""
+    img = floor()
+    vline(img, 200, 0, 205)                       # 가까운 띠(213~)엔 없음
+    r = run(img, frames=12)
+    assert not r.line_found and r.raw_event == LineEvent.NONE and r.event == LineEvent.NONE
 
 
 def test_colored_markers_are_not_line():
@@ -147,7 +182,7 @@ def test_without_saturation_filter_touching_marker_breaks_detection():
     det = LineDetector(LineConfig(black_s_max=255))
     for _ in range(3):
         r = det.process(touching_markers())
-    assert abs(r.offset) > 0.1 or r.raw_event != LineEvent.NONE
+    assert abs(r.offset) > 0.1 or r.raw_event != LineEvent.NONE or not r.line_found   # 밀리거나 놓침
 
 
 @pytest.mark.parametrize("x0, x1", [(0, 70), (220, 320), (5, 130)])

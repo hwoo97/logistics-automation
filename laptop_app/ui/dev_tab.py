@@ -13,7 +13,7 @@ from ui.video_view import VideoView
 CAPTURE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "captures")
 LOAD_DISTANCE, OBSTACLE_DISTANCE = 0.10, 0.15   # params.yaml 초기값 (그래프 기준선)
 # 라인 주행 조정 초기값 (params.yaml drive_node와 같게) — 바꾼 값은 config.json에 저장, 연결할 때마다 차량에 다시 보냄
-DEFAULT_TUNING = {"speed": 0.6, "turn": 1.0, "center": -0.10}
+DEFAULT_TUNING = {"speed": 0.6, "turn": 1.0, "center": -0.10, "confirm": 3, "line_end": 10}
 
 
 class DevTab(ttk.Frame):
@@ -201,11 +201,16 @@ class DevTab(ttk.Frame):
         self.speed = tk.DoubleVar(value=self.tuning["speed"])
         self.turn = tk.DoubleVar(value=self.tuning["turn"])
         self.center = tk.DoubleVar(value=self.tuning["center"])
+        self.confirm = tk.DoubleVar(value=self.tuning["confirm"])
+        self.line_end = tk.DoubleVar(value=self.tuning["line_end"])
         rows = (("속도", self.speed, SPEED_RANGE, 0.05, self._send_speed),
                 ("회전 세기", self.turn, TUNE_RANGES["TURN"], 0.05, lambda: self._send_tune("TURN", self.turn)),
-                ("라인 기준", self.center, TUNE_RANGES["CENTER"], 0.01, lambda: self._send_tune("CENTER", self.center)))
+                ("라인 기준", self.center, TUNE_RANGES["CENTER"], 0.01, lambda: self._send_tune("CENTER", self.center)),
+                ("확인 프레임", self.confirm, TUNE_RANGES["CONFIRM"], 1, lambda: self._send_tune("CONFIRM", self.confirm)),
+                ("라인 끝 프레임", self.line_end, TUNE_RANGES["LINE_END"], 1,
+                 lambda: self._send_tune("LINE_END", self.line_end)))
         for r, (name, var, (lo, hi), step, send) in enumerate(rows, start=1):
-            ttk.Label(f, text=name, width=8).grid(row=r, column=0, sticky="w", padx=(4, 0))
+            ttk.Label(f, text=name, width=11).grid(row=r, column=0, sticky="w", padx=(4, 0))
             s = tk.Scale(f, from_=lo, to=hi, resolution=step, orient="horizontal", variable=var, length=150,
                          showvalue=True)
             s.grid(row=r, column=1, sticky="w")
@@ -216,8 +221,8 @@ class DevTab(ttk.Frame):
                 ttk.Button(box, text=text, width=2,
                            command=lambda v=var, lo=lo, hi=hi, st=step * sign, send=send: self._nudge(v, lo, hi, st, send)
                            ).pack(side="left")
-        ttk.Label(f, text="놓으면 적용, 주행 중에도. 흔들리면 회전 세기 ↓\n라인 기준: 파란 눈금, 음수 = 화면 왼쪽",
-                  foreground="gray").grid(row=4, column=0, columnspan=3, sticky="w", padx=4)
+        ttk.Label(f, text="놓으면 적용(주행 중에도) · 라인 기준 = 파란 눈금 · 프레임 = 몇 장 연속 봐야 멈출지",
+                  foreground="gray").grid(row=len(rows) + 1, column=0, columnspan=3, sticky="w", padx=4)
         return f
 
     def _nudge(self, var, lo, hi, step, send):
@@ -226,7 +231,8 @@ class DevTab(ttk.Frame):
 
     def _remember(self):
         self.tuning = {"speed": round(self.speed.get(), 2), "turn": round(self.turn.get(), 2),
-                       "center": round(self.center.get(), 2)}
+                       "center": round(self.center.get(), 2), "confirm": int(self.confirm.get()),
+                       "line_end": int(self.line_end.get())}
         self.on_tuning(self.tuning)
 
     def _send_tune(self, key, var):
@@ -234,10 +240,11 @@ class DevTab(ttk.Frame):
         self._remember()
 
     def send_tuning(self):
-        """연결될 때마다 — 차량(drive_node)을 앱의 조정값에 맞춤 (Pi에서 노드를 다시 켜도 같은 값)."""
+        """연결될 때마다 — 차량(drive_node·line_node)을 앱의 조정값에 맞춤 (Pi에서 노드를 다시 켜도 같은 값)."""
         self._send_speed()
-        self._send_tune("TURN", self.turn)
-        self._send_tune("CENTER", self.center)
+        for key, var in (("TURN", self.turn), ("CENTER", self.center), ("CONFIRM", self.confirm),
+                         ("LINE_END", self.line_end)):
+            self._send_tune(key, var)
 
     def _start_drive(self):
         """카메라를 LINE 자세로 내리고 0.5초 뒤(자세 안정) 출발. 멈춤: 정지 버튼·Space·정지선·코너·라인 끝."""

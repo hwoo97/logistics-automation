@@ -88,6 +88,7 @@
 | `/dev/wheels` | std_msgs/Float32MultiArray | bt_bridge → motor_node | 0.3초 반복 | 개발자 탭: L1~L4 듀티 (-1~1), 워치독 적용 |
 | `/drive/speed` | std_msgs/Float32 | bt_bridge → drive_node | 이벤트 | 개발자 탭 "주행 속도": 라인 주행 기본 선속도 (0.2~1.0), 주행 중에도 적용 |
 | `/drive/tune` | std_msgs/String | bt_bridge → drive_node | 이벤트 | 개발자 탭 "회전 세기"(`TURN 0.6`)·"라인 기준"(`CENTER -0.1`), 주행 중에도 적용 |
+| `/line/tune` | std_msgs/String | bt_bridge → line_node | 이벤트 | 개발자 탭 "확인 프레임"(`CONFIRM 3`)·"라인 끝 프레임"(`LINE_END 10`), 실행 중 적용 |
 | `/dev/pantilt_angle` | std_msgs/Float32MultiArray | bt_bridge → pantilt_node | 이벤트 | 개발자 탭: [팬, 틸트] 각도 |
 
 ### 서비스 / 액션
@@ -260,7 +261,7 @@ def choose_branch(markers, target):          # markers: {"left": [...], "front":
   | STOP_LINE | 가로 검은 폭이 라인 폭의 2~8배 (짧은 가로선) + **라인 왼쪽·오른쪽에 모두 걸침** + **세로 두께 ≥ 라인 폭 × 0.8** (2026-10-30: 바닥의 얇은 가로선이 정지선으로 잡혀 추가, 정지선은 40~50mm 테이프) |
   | ~~JUNCTION_T / LEFT / RIGHT~~ | **판정 안 함 — 분기점은 색 마커 인식이 맡음 (2026-10-30 결정)**. T자·옆 갈래 모양은 NONE, 마커를 놓쳐 T자에서 라인이 끊기면 LINE_END로 정지 |
   | CORNER_LEFT / RIGHT | 앞쪽 라인 없음 + 한쪽으로만 가로 라인 |
-  | LINE_END | 관심 영역에 라인 없음 |
+  | LINE_END | 관심 영역에 라인 없음 — 가까운 띠에서만 놓치고 위쪽(중간·먼 띠)에 라인이 보이면 "잠깐 놓침"(NONE, 감속), **10프레임 연속**이어야 확정 (2026-10-30: 3프레임이면 흔들림으로 잠깐 놓쳐도 멈춤) |
 - 라인 각도 (2026-10-30, 차량이 비스듬하면 라인이 대각선으로 보이는 문제): 관심 영역 맨 아래부터 위로 줄마다 라인 중심을 따라가 직선을 맞춰 각도 계산(90° = 똑바로, 90° 미만 = 위쪽이 오른쪽). 끝점 2개 대신 직선 맞춤 — 끝부분 흔들림에 덜 민감
 - `drive_node` PID: 각속도 z = −turn_scale·(Kp·e + Kd·Δe + Kh·각도 오차/45°) (Ki는 필요 시), e = 오프셋 − center_offset(카메라가 차체 중심에서 비켜 달린 만큼, 2026-10-30 −0.10), 각도 오차는 85~95° 밖으로 벗어난 만큼만(`heading_deadband_deg` 5°). 선속도는 오차가 크면 감속. 이벤트 검출 시 감속 → 정지
 - 같은 이벤트가 연속 3프레임 이상일 때만 확정 (노이즈 방지)
