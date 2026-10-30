@@ -3,7 +3,10 @@
 지금 구현: FOLLOW_TO_EVENT(라인 따라가다 이벤트에서 정지), STOP. TURN·STRAIGHT·UTURN·APPROACH는 S2·S7·S8에서 추가.
 부호: 오프셋 + = 라인이 오른쪽 → 오른쪽으로 돌아야 함 → /cmd_vel z는 음수 (z > 0 = 왼쪽 회전, agv_hw.logic.mix).
 각도 보정: 라인 각도가 90° ± heading_deadband_deg(85~95°)를 벗어나면 벗어난 만큼 회전에 더함.
-  각도 < 85 (위쪽이 오른쪽으로 기움) → 오른쪽으로, 각도 > 95 → 왼쪽으로. 회전 = −(PID(오프셋) + kh × 각도 오차/45°)
+  각도 < 85 (위쪽이 오른쪽으로 기움) → 오른쪽으로, 각도 > 95 → 왼쪽으로.
+회전 = −turn_scale × (PID(오프셋 − center_offset) + kh × 각도 오차/45°)
+  center_offset: 카메라가 차체 중심에서 비켜 달려 있을 때 라인이 와야 할 화면 위치 (−0.1 = 가운데에서 10% 왼쪽)
+  turn_scale   : 회전 세기 — 노트북 앱에서 주행 중 조정 (흔들리면 낮춤)
 """
 from dataclasses import dataclass
 
@@ -23,6 +26,8 @@ class DriveConfig:
     ki: float = 0.0
     kd: float = 0.15
     kh: float = 0.5                 # 각도 보정 비율 (각도 오차 45°일 때 회전 0.5)
+    turn_scale: float = 1.0         # 회전 세기 (회전량 전체에 곱함, DEV TUNE TURN)
+    center_offset: float = 0.0      # 라인 기준 위치 (오프셋 목표, 음수 = 화면 왼쪽, DEV TUNE CENTER)
     heading_deadband_deg: float = 5.0   # 90°에서 이 안쪽(85~95°)은 각도 보정 안 함
     max_angular: float = 0.6
     line_timeout_s: float = 0.5     # 라인 상태가 이 시간 동안 안 오면 정지 (E_LINE)
@@ -95,6 +100,15 @@ class DriveController:
         self.cfg.min_speed = min(self._floor[0], speed)
         self.cfg.event_speed = min(self._floor[1], speed)
 
+    def set_tune(self, key: str, value: float) -> None:
+        """노트북 앱 조정 (DEV TUNE) — TURN: 회전 세기, CENTER: 라인 기준 위치. 주행 중에도 바로 적용."""
+        if key == "TURN":
+            self.cfg.turn_scale = value
+        elif key == "CENTER":
+            self.cfg.center_offset = value
+        else:
+            raise ValueError(f"모르는 조정 항목: {key}")
+
     def start(self, command: DriveCommand) -> None:
         self.command = DriveCommand(command)
         self.pid.reset()
@@ -126,9 +140,10 @@ class DriveController:
             return DriveOutput(0.0, 0.0, True, line.event.value)
 
         c = self.cfg
+        err = line.offset - c.center_offset                 # 라인이 기준 위치보다 오른쪽이면 +
         heading = heading_error(line.angle, c.heading_deadband_deg) / 45.0 if line.angle_valid else 0.0
-        angular = _clip(-(self.pid.update(line.offset, dt) + c.kh * heading), c.max_angular)
-        linear = max(c.min_speed, c.speed * (1.0 - c.slow_gain * abs(line.offset)))
+        angular = _clip(-c.turn_scale * (self.pid.update(err, dt) + c.kh * heading), c.max_angular)
+        linear = max(c.min_speed, c.speed * (1.0 - c.slow_gain * abs(err)))
         if line.raw_event != LineEvent.NONE or not line.line_found:
             linear = min(linear, c.event_speed)          # 이벤트가 보이기 시작하면 감속
         self.last = DriveOutput(round(linear, 3), round(angular, 3))

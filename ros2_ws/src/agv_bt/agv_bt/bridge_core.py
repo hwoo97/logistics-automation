@@ -2,7 +2,8 @@
 
 출력은 io 객체의 메서드로 내보낸다 (노드는 이를 ROS 토픽 발행으로 연결, 시험은 가짜 io로 확인).
   io.send(line) / io.estop(bool) / io.cmd_vel(v, w) / io.led(state) / io.pose(name)
-  io.servo(pan, tilt) / io.wheels([l1..l4]) / io.speed(v) / io.drive("FOLLOW"|"STOP") / io.node_names() -> list
+  io.servo(pan, tilt) / io.wheels([l1..l4]) / io.speed(v) / io.drive("FOLLOW"|"STOP") / io.tune(key, v)
+  io.node_names() -> list
   io.mission(cmd)
 
 standalone=True : mission_node가 없는 단위 개발 단계. 상태(IDLE·MANUAL·ESTOP)를 브리지가 직접 관리한다.
@@ -129,6 +130,8 @@ class BridgeCore:
             self.io.speed(float(rest[0]))
         elif sub == "DRIVE":
             self.io.drive(rest[0])
+        elif sub == "TUNE":
+            self.io.tune(rest[0], float(rest[1]))
         elif sub == "WATCH":
             keys = WATCH_KEYS if rest[0] == "ALL" else (rest[0],)
             for k in keys:

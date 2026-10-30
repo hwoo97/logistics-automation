@@ -20,6 +20,8 @@ from agv_protocol.types import Cargo, State, Target
     ("DEV speed 0.55", "DEV", ["SPEED", "0.55"]),
     ("DEV drive follow", "DEV", ["DRIVE", "FOLLOW"]),
     ("DEV DRIVE STOP", "DEV", ["DRIVE", "STOP"]),
+    ("DEV tune turn 0.6", "DEV", ["TUNE", "TURN", "0.6"]),
+    ("DEV TUNE CENTER -0.1", "DEV", ["TUNE", "CENTER", "-0.1"]),
 ])
 def test_parse_valid(line, kind, args):
     cmd = parse_command(line)
@@ -32,6 +34,7 @@ def test_parse_valid(line, kind, args):
     "DEV WHEEL 2 0 0 0", "DEV WATCH RANGE", "DEV WATCH FOO ON", "DEV NODES x", "DEV FOO", "JUMP",
     "DEV SPEED", "DEV SPEED 0.1", "DEV SPEED 1.5", "DEV SPEED fast", "DEV SPEED 0.5 0.5",
     "DEV DRIVE", "DEV DRIVE GO", "DEV DRIVE FOLLOW STOP",
+    "DEV TUNE", "DEV TUNE TURN", "DEV TUNE KP 1", "DEV TUNE TURN 2", "DEV TUNE CENTER -0.7", "DEV TUNE TURN x",
 ])
 def test_parse_invalid(line):
     with pytest.raises(ValueError):
@@ -68,6 +71,7 @@ def test_command_key():
     ("DEV DRIVE FOLLOW", "ESTOP", False),
     ("DEV DRIVE STOP", "ESTOP", True),           # 정지는 언제나
     ("DEV DRIVE STOP", "MANUAL", True),
+    ("DEV TUNE TURN 0.5", "NAVIGATE", True),     # 주행 중에도
 ])
 def test_check_allowed(line, state, ok):
     assert (check_allowed(parse_command(line), state) is None) == ok

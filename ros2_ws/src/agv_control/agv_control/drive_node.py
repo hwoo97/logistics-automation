@@ -3,7 +3,8 @@
     ros2 action send_goal /drive agv_interfaces/action/Drive "{command: FOLLOW_TO_EVENT}" --feedback
 
 /line/state를 받아 라인을 따라가고, 이벤트(정지선·코너·라인 끝)·라인 끊김·비상 정지·취소에서 멈춘다.
-/drive/speed(Float32, 노트북 앱 DEV SPEED)로 기본 속도를 주행 중에도 바꾼다.
+/drive/speed(Float32, 노트북 앱 DEV SPEED)로 기본 속도, /drive/tune(String "TURN 0.6"·"CENTER -0.1", DEV TUNE)으로
+회전 세기·라인 기준 위치를 주행 중에도 바꾼다.
 동작 중이 아닐 때는 /cmd_vel을 보내지 않는다 (노트북 앱 수동 조종과 겹치지 않게).
 """
 import threading
@@ -16,7 +17,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from std_msgs.msg import Bool, Float32
+from std_msgs.msg import Bool, Float32, String
 
 from agv_control.drive import DriveConfig, DriveController, LineInput
 from agv_interfaces.action import Drive
@@ -53,6 +54,7 @@ class DriveNode(Node):
                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT), callback_group=group)
         self.create_subscription(Bool, "/safety/estop", self.on_estop, QoSProfile(depth=10), callback_group=group)
         self.create_subscription(Float32, "/drive/speed", self.on_speed, QoSProfile(depth=10), callback_group=group)
+        self.create_subscription(String, "/drive/tune", self.on_tune, QoSProfile(depth=10), callback_group=group)
         self.create_timer(1.0 / self.rate, self.on_timer, callback_group=group)
         self.server = ActionServer(self, Drive, "/drive", execute_callback=self.execute,
                                    goal_callback=self.on_goal, cancel_callback=lambda _: CancelResponse.ACCEPT,
@@ -80,6 +82,17 @@ class DriveNode(Node):
         with self.lock:
             self.ctrl.set_speed(value)
         self.get_logger().info(f"주행 속도 {value:.2f}")
+
+    def on_tune(self, msg: String):
+        """노트북 앱 "회전 세기"·"라인 기준 위치" (DEV TUNE) — "TURN 0.6", "CENTER -0.1"."""
+        try:
+            key, value = msg.data.split()
+            with self.lock:
+                self.ctrl.set_tune(key, float(value))
+        except ValueError as e:
+            self.get_logger().warn(f"/drive/tune 형식 오류 {msg.data!r}: {e}")
+            return
+        self.get_logger().info(f"조정 {key} = {float(value):.2f}")
 
     def on_goal(self, goal):
         try:

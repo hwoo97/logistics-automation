@@ -87,8 +87,9 @@ def test_drive_follow_and_stop(core):
     for line in ("MANUAL ON", "DEV WHEEL 0.5 0 0 0", "DEV DRIVE FOLLOW"):     # 주행 중 겹치는 명령 거부
         c.on_line(line)
         assert "라인 주행 중" in io.replies("NAK")[-1]["reason"]
-    c.on_line("DEV SPEED 0.7")                                              # 속도는 허용
-    assert ("speed", 0.7) in io.calls
+    c.on_line("DEV SPEED 0.7")                                              # 속도·조정은 허용
+    c.on_line("DEV TUNE TURN 0.5")
+    assert ("speed", 0.7) in io.calls and ("tune", "TURN", 0.5) in io.calls
     c.on_line("DEV DRIVE STOP")
     assert ("drive", "STOP") in io.calls
 

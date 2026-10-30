@@ -154,6 +154,8 @@ class FakeVehicle:
             self.wheels, self.last_wheel = [float(v) for v in rest], now
         elif sub == "SPEED":
             self.drive_speed = float(rest[0])
+        elif sub == "TUNE":
+            setattr(self, "drive_" + rest[0].lower(), float(rest[1]))   # drive_turn, drive_center
         elif sub == "DRIVE":
             if rest[0] == "FOLLOW":
                 self.drive_end = now + 6.0 / self.drive_speed      # 빠를수록 일찍 도착
@@ -287,7 +289,7 @@ class FakeVehicle:
             if state in ("CHECK_SIGN", "APPROACH"):
                 d.rectangle((90, 200, 230, 212), fill="black")
         d.rectangle((0, 0, 320, 18), fill=(40, 40, 40))
-        d.text((4, 3), f"FAKE  {state}  pan {pan:.0f} tilt {tilt:.0f}  spd {self.drive_speed:.2f}", fill="white")
+        d.text((4, 3), f"FAKE  {state}  pan {pan:.0f} tilt {tilt:.0f}  spd {self.drive_speed:.2f} turn {getattr(self, 'drive_turn', 1.0):.2f}", fill="white")
         color = {"RED": "red", "GREEN": "lime", "ERROR": "orange"}.get(led, (90, 90, 90))
         d.ellipse((298, 2, 314, 16), fill=color)
         if any(wheels):

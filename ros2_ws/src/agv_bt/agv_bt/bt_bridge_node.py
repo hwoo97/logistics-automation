@@ -48,6 +48,7 @@ class BtBridgeNode(Node):
         self.pub_angle = self.create_publisher(Float32MultiArray, "/dev/pantilt_angle", q10)
         self.pub_wheels = self.create_publisher(Float32MultiArray, "/dev/wheels", QoSProfile(depth=1))
         self.pub_speed = self.create_publisher(Float32, "/drive/speed", q10)
+        self.pub_tune = self.create_publisher(String, "/drive/tune", q10)
         self.create_subscription(Range, "/ultrasonic/range", self.on_range, qos_profile_sensor_data)
         self.create_subscription(Image, camera_topic, self.on_image, qos_profile_sensor_data)
         try:                                                  # agv_interfaces가 없으면 LINE만 빠짐
@@ -102,6 +103,9 @@ class BtBridgeNode(Node):
 
     def speed(self, value):
         self.pub_speed.publish(Float32(data=float(value)))
+
+    def tune(self, key, value):
+        self.pub_tune.publish(String(data=f"{key} {float(value)}"))
 
     def drive(self, action):
         """DEV DRIVE FOLLOW|STOP — drive_node에 FOLLOW_TO_EVENT 목표를 보내거나 취소. 결과는 DEV DRIVE로 알림."""

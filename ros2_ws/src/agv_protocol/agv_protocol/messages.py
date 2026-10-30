@@ -31,6 +31,7 @@ ALLOWED_STATES = {
     "DEV WHEEL": frozenset({"IDLE", "MANUAL"}),
     "DEV SPEED": ALL_STATES,              # 주행 중에도 속도 조절
     "DEV DRIVE": ALL_STATES,              # STOP은 언제나, FOLLOW는 IDLE에서만 (check_allowed)
+    "DEV TUNE": ALL_STATES,               # 주행 중에도 조정
     "DEV WATCH": ALL_STATES,
     "DEV NODES": ALL_STATES,
 }
@@ -38,6 +39,8 @@ ALLOWED_STATES = {
 WATCH_KEYS = ("RANGE", "LINE", "SYS")
 SPEED_RANGE = (0.2, 1.0)        # DEV SPEED — drive_node 기본 선속도
 DRIVE_ACTIONS = ("FOLLOW", "STOP")      # DEV DRIVE — 시험용 라인 주행 시작·정지
+TUNE_RANGES = {"TURN": (0.1, 1.5),      # DEV TUNE — 회전 세기 (회전량 전체에 곱함)
+               "CENTER": (-0.5, 0.5)}   #            라인 기준 위치 (오프셋 목표, 음수 = 화면 왼쪽)
 
 
 @dataclass
@@ -99,6 +102,11 @@ def _validate_dev(cmd: Command) -> None:
         if len(rest) != 1 or rest[0].upper() not in DRIVE_ACTIONS:
             raise ValueError(f"DEV DRIVE: {'/'.join(DRIVE_ACTIONS)} 중 하나")
         cmd.args[1] = rest[0].upper()                 # rest는 복사본 — 원본 인자를 바꿈
+    elif sub == "TUNE":
+        if len(rest) != 2 or rest[0].upper() not in TUNE_RANGES:
+            raise ValueError(f"DEV TUNE: <{'|'.join(TUNE_RANGES)}> <값>")
+        cmd.args[1] = rest[0].upper()
+        _number(rest[1], *TUNE_RANGES[cmd.args[1]], cmd.args[1].lower())
     elif sub == "WATCH":
         if len(rest) != 2 or rest[0] not in (*WATCH_KEYS, "ALL") or rest[1] not in ("ON", "OFF"):
             raise ValueError("DEV WATCH: <RANGE|LINE|SYS|ALL> <ON|OFF>")

@@ -56,7 +56,8 @@ class MainWindow:
         self.tabs = ttk.Notebook(root)
         self.tabs.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self.user = UserTab(self.tabs, self.send)
-        self.dev = DevTab(self.tabs, self.send, self.send_line)
+        self.dev = DevTab(self.tabs, self.send, self.send_line, tuning=self.cfg.get("drive_tuning"),
+                          on_tuning=self._save_tuning)
         self.dev.get_latest_frame = lambda: self.video.latest
         self.tabs.add(self.user, text="  사용자  ")
         self.tabs.add(self.dev, text="  개발자  ")
@@ -93,6 +94,11 @@ class MainWindow:
                                    activebackground="#b71c1c", font=("맑은 고딕", 13, "bold"),
                                    padx=14, command=self.estop)
         self.estop_btn.pack(side="right")
+
+    def _save_tuning(self, tuning: dict):
+        if self.cfg.get("drive_tuning") != tuning:
+            self.cfg["drive_tuning"] = tuning
+            save_config(self.cfg)
 
     def _apply_flip(self):
         """두 탭 영상에 반전 적용, 다음 실행을 위해 config.json에 저장."""
@@ -217,6 +223,7 @@ class MainWindow:
             self.dev.log("SYS", "연결됨" + (f" (영상 채널 실패: {item[1]})" if item[1] else ""))
             self.user.add_event("연결됨")
             self.dev.resend_watches()
+            self.dev.send_tuning()
         elif kind == "connect_failed":
             self.connecting = False
             self._lock_inputs(False)

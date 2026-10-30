@@ -7,19 +7,22 @@ from collections import deque
 from tkinter import filedialog, ttk
 
 import _paths  # noqa: F401
-from agv_protocol.messages import MOVE_REPEAT_S, SPEED_RANGE, WATCH_KEYS
+from agv_protocol.messages import MOVE_REPEAT_S, SPEED_RANGE, TUNE_RANGES, WATCH_KEYS
 from ui.video_view import VideoView
 
 CAPTURE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "captures")
 LOAD_DISTANCE, OBSTACLE_DISTANCE = 0.10, 0.15   # params.yaml 초기값 (그래프 기준선)
-DEFAULT_DRIVE_SPEED = 0.6                       # params.yaml drive_node.speed 초기값
+# 라인 주행 조정 초기값 (params.yaml drive_node와 같게) — 바꾼 값은 config.json에 저장, 연결할 때마다 차량에 다시 보냄
+DEFAULT_TUNING = {"speed": 0.6, "turn": 1.0, "center": -0.10}
 
 
 class DevTab(ttk.Frame):
-    def __init__(self, master, send, send_line):
+    def __init__(self, master, send, send_line, tuning: dict | None = None, on_tuning=None):
         super().__init__(master, padding=6)
         self.send = send                    # send(kind, *args) — 형식 검증
         self.send_line = send_line          # 콘솔 직접 입력용
+        self.tuning = {**DEFAULT_TUNING, **(tuning or {})}
+        self.on_tuning = on_tuning or (lambda d: None)     # 조정값 저장 (MainWindow → config.json)
         self.ranges: deque = deque(maxlen=120)
         self._wheel_job = None
         self.log_lines: list[str] = []
@@ -162,6 +165,8 @@ class DevTab(ttk.Frame):
             dx = h / math.tan(math.radians(a))
             c.create_line(cx, h, cx + dx, 0, fill="#a5d6a7")
         c.create_line(cx, 0, cx, h, fill="gray", dash=(2, 2))
+        tx = cx + self.center.get() * w / 2                  # 라인 기준 위치 (파란 눈금 — 라인이 여기 오면 직진)
+        c.create_polygon(tx - 6, h, tx + 6, h, tx, h - 10, fill="#1565c0")
         x = cx + offset * w / 2
         if angle is None:                                    # 각도를 못 믿으면 위치만
             c.create_rectangle(x - 5, h - 20, x + 5, h - 2, fill="black")
@@ -193,16 +198,46 @@ class DevTab(ttk.Frame):
                   command=lambda: self.send("DEV", "DRIVE", "STOP")).pack(side="left", padx=4)
         self.drive_lbl = ttk.Label(run, text="대기", width=18)
         self.drive_lbl.pack(side="left", padx=4)
-        ttk.Label(f, text="속도 (0.2~1.0)").grid(row=1, column=0, columnspan=3, sticky="w", padx=4)
-        self.speed = tk.DoubleVar(value=DEFAULT_DRIVE_SPEED)
-        s = tk.Scale(f, from_=SPEED_RANGE[0], to=SPEED_RANGE[1], resolution=0.05, orient="horizontal",
-                     variable=self.speed, length=200)
-        s.grid(row=2, column=0, columnspan=3, sticky="w", padx=4)
-        s.bind("<ButtonRelease-1>", lambda e: self._send_speed())
-        for i, (text, step) in enumerate((("−", -0.05), ("+", 0.05))):
-            ttk.Button(f, text=text, width=3, command=lambda st=step: self._nudge_speed(st)).grid(row=3, column=i, padx=2, pady=2)
-        ttk.Label(f, text="놓으면 적용 · 주행 중에도", foreground="gray").grid(row=3, column=2, sticky="w")
+        self.speed = tk.DoubleVar(value=self.tuning["speed"])
+        self.turn = tk.DoubleVar(value=self.tuning["turn"])
+        self.center = tk.DoubleVar(value=self.tuning["center"])
+        rows = (("속도", self.speed, SPEED_RANGE, 0.05, self._send_speed),
+                ("회전 세기", self.turn, TUNE_RANGES["TURN"], 0.05, lambda: self._send_tune("TURN", self.turn)),
+                ("라인 기준", self.center, TUNE_RANGES["CENTER"], 0.01, lambda: self._send_tune("CENTER", self.center)))
+        for r, (name, var, (lo, hi), step, send) in enumerate(rows, start=1):
+            ttk.Label(f, text=name, width=8).grid(row=r, column=0, sticky="w", padx=(4, 0))
+            s = tk.Scale(f, from_=lo, to=hi, resolution=step, orient="horizontal", variable=var, length=150,
+                         showvalue=True)
+            s.grid(row=r, column=1, sticky="w")
+            s.bind("<ButtonRelease-1>", lambda e, send=send: send())
+            box = ttk.Frame(f)
+            box.grid(row=r, column=2, sticky="s", pady=(0, 2))
+            for text, sign in (("−", -1), ("+", 1)):
+                ttk.Button(box, text=text, width=2,
+                           command=lambda v=var, lo=lo, hi=hi, st=step * sign, send=send: self._nudge(v, lo, hi, st, send)
+                           ).pack(side="left")
+        ttk.Label(f, text="놓으면 적용, 주행 중에도. 흔들리면 회전 세기 ↓\n라인 기준: 파란 눈금, 음수 = 화면 왼쪽",
+                  foreground="gray").grid(row=4, column=0, columnspan=3, sticky="w", padx=4)
         return f
+
+    def _nudge(self, var, lo, hi, step, send):
+        var.set(round(min(hi, max(lo, var.get() + step)), 2))
+        send()
+
+    def _remember(self):
+        self.tuning = {"speed": round(self.speed.get(), 2), "turn": round(self.turn.get(), 2),
+                       "center": round(self.center.get(), 2)}
+        self.on_tuning(self.tuning)
+
+    def _send_tune(self, key, var):
+        self.send("DEV", "TUNE", key, float(round(var.get(), 2)))
+        self._remember()
+
+    def send_tuning(self):
+        """연결될 때마다 — 차량(drive_node)을 앱의 조정값에 맞춤 (Pi에서 노드를 다시 켜도 같은 값)."""
+        self._send_speed()
+        self._send_tune("TURN", self.turn)
+        self._send_tune("CENTER", self.center)
 
     def _start_drive(self):
         """카메라를 LINE 자세로 내리고 0.5초 뒤(자세 안정) 출발. 멈춤: 정지 버튼·Space·정지선·코너·라인 끝."""
@@ -211,13 +246,9 @@ class DevTab(ttk.Frame):
         self.drive_lbl.config(text="출발 준비…", foreground="#f57c00")
         self.after(500, lambda: self.send("DEV", "DRIVE", "FOLLOW"))
 
-    def _nudge_speed(self, step):
-        lo, hi = SPEED_RANGE
-        self.speed.set(round(min(hi, max(lo, self.speed.get() + step)), 2))
-        self._send_speed()
-
     def _send_speed(self):
         self.send("DEV", "SPEED", float(round(self.speed.get(), 2)))
+        self._remember()
 
     def _save_snapshot(self):
         jpeg = self.get_latest_frame()

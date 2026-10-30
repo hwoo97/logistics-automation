@@ -147,5 +147,34 @@ def test_heading_adds_to_offset_correction():
     assert both < only_offset < 0                             # 둘 다 오른쪽 → 더 크게 오른쪽
 
 
+def test_center_offset_shifts_target():
+    """카메라가 왼쪽에 달려 기준 위치 −0.1 — 라인이 −0.1에 있으면 직진, 가운데(0)에 있으면 오른쪽으로."""
+    d = follow()
+    d.set_tune("CENTER", -0.1)
+    assert d.step(LineInput(-0.1, True), DT).angular == 0
+    d = follow()
+    d.set_tune("CENTER", -0.1)
+    assert d.step(LineInput(0.0, True), DT).angular < 0
+
+
+def test_turn_scale_scales_rotation():
+    full = follow().step(LineInput(0.2, True, angle=80, angle_valid=True), DT).angular
+    d = follow()
+    d.set_tune("TURN", 0.5)
+    half = d.step(LineInput(0.2, True, angle=80, angle_valid=True), DT).angular
+    assert half == pytest.approx(full / 2, abs=1e-3)
+
+
+def test_turn_scale_does_not_change_speed():
+    d = follow()
+    d.set_tune("TURN", 0.3)
+    assert d.step(LineInput(0.0, True), DT).linear == pytest.approx(DriveConfig().speed)
+
+
+def test_unknown_tune_key():
+    with pytest.raises(ValueError):
+        follow().set_tune("KP", 1.0)
+
+
 def test_idle_outputs_zero():
     assert DriveController().step(LineInput(0.5, True), DT).linear == 0
