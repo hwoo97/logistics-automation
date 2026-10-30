@@ -8,6 +8,7 @@
 |------|------|
 | [led_check.py](led_check.py) | 헤더 GPIO 칩(RP1)을 자동으로 찾아 빨강 GPIO16 → 초록 GPIO26 차례로 깜박임 |
 | [pca9685_check.py](pca9685_check.py) | I2C 버스 스캔 → PCA9685(0x40) 레지스터 읽기 → (`--channel`) 서보를 50Hz로 각도 이동 |
+| [ultrasonic_check.py](ultrasonic_check.py) | HC-SR04를 콜백 방식(노드와 같음)·직접 읽기 방식으로 번갈아 측정, Echo 대기 레벨 표시 → 센서·배선 문제인지 콜백 문제인지 구분 (launch 끄고 실행) |
 
 ## 1. 설치·권한
 ```bash
@@ -54,6 +55,13 @@ python3 pca9685_check.py --channel 1
 - **I2C는 응답하는데 서보가 안 움직이면**: `--oe-low` 추가 → GPIO17을 LOW로 두고 다시 시험
   - 이걸로 움직이면 **GPIO17 = PCA9685 OE**로 확정 (핀맵의 GPIO17 예약 해소) → 결과표에 기록
 - 헤더 번호 ↔ 채널 번호, 팬/틸트 위치를 [핀맵](../../02_design/hardware/pinmap.md) 서보 표에 반영
+
+## 5-1. 초음파 확인 (lgpio)
+```bash
+python3 ultrasonic_check.py              # 0.2초마다 20회, 손을 10cm·30cm·치움으로 바꿔 가며
+```
+- 두 방식이 모두 거리를 따라가면 정상. 읽기만 성공하면 콜백 방식 문제 → 노드 수정. 둘 다 실패면 Trig·Echo 배선, 5V, Echo 분압 확인
+- Echo 대기 레벨이 계속 1이면 Echo 선·분압 문제
 
 ## 6. 통과 기준 (G1)
 | # | 항목 | 통과 기준 |

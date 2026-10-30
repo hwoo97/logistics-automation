@@ -6,15 +6,26 @@ from agv_protocol.types import LedState
 
 
 class MedianFilter:
-    """이동 중앙값. None·범위 밖 값은 버리고, 유효값이 없으면 None."""
+    """이동 중앙값. None·범위 밖 값은 버리고, 유효값이 없으면 None.
 
-    def __init__(self, window: int = 5, min_value: float = 0.02, max_value: float = 2.0):
+    무효값이 max_misses번 연속이면 쌓인 값을 비운다 — 측정이 계속 실패할 때 옛 값을 그대로 내보내지 않도록
+    (2026-10-29 S0: 첫 측정 뒤 거리가 바뀌어도 값이 그대로였던 문제).
+    """
+
+    def __init__(self, window: int = 5, min_value: float = 0.02, max_value: float = 2.0, max_misses: int | None = None):
         self.values: deque = deque(maxlen=window)
         self.min_value, self.max_value = min_value, max_value
+        self.max_misses = window if max_misses is None else max_misses
+        self.misses = 0
 
     def push(self, value: float | None) -> float | None:
         if value is not None and self.min_value <= value <= self.max_value:
             self.values.append(value)
+            self.misses = 0
+        else:
+            self.misses += 1
+            if self.misses >= self.max_misses:
+                self.values.clear()
         return statistics.median(self.values) if self.values else None
 
 

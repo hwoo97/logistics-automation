@@ -18,6 +18,25 @@ def test_median_filter_drops_invalid():
     assert f.push(0.6) == 0.6             # 0.5, 0.7, 0.6 중앙값
 
 
+def test_median_filter_forgets_after_repeated_misses():
+    """측정이 계속 실패하면 옛 값을 내보내지 않는다 (2026-10-29 S0 초음파 값 고정 증상)."""
+    f = MedianFilter(window=5)
+    for _ in range(5):
+        f.push(0.10)
+    for _ in range(4):
+        assert f.push(None) == 0.10       # 잠깐 실패는 견딤
+    assert f.push(None) is None           # 5번 연속 실패 → 비움
+    assert f.push(0.30) == 0.30           # 다시 측정되면 새 값
+
+
+def test_median_filter_follows_distance_change():
+    f = MedianFilter(window=5)
+    for _ in range(5):
+        f.push(0.10)
+    values = [f.push(0.30) for _ in range(3)]
+    assert values[-1] == 0.30             # 5개 중 3개가 새 값이면 중앙값이 바뀜
+
+
 @pytest.mark.parametrize("x, z, expect", [
     (0.5, 0.0, (0.5, 0.5)),
     (0.0, 0.5, (-0.5, 0.5)),              # 왼쪽 회전: 왼쪽 뒤로, 오른쪽 앞으로
