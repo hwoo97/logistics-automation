@@ -60,6 +60,7 @@ class MainWindow:
         self.dev.get_latest_frame = lambda: self.video.latest
         self.tabs.add(self.user, text="  사용자  ")
         self.tabs.add(self.dev, text="  개발자  ")
+        self._apply_flip()
 
         root.bind_all("<KeyPress>", self._on_key)
         root.bind_all("<KeyRelease>", self._on_key_release)
@@ -84,10 +85,23 @@ class MainWindow:
         self.conn_btn.pack(side="left", padx=4)
         self.conn_lbl = ttk.Label(bar, text="연결 안 됨", foreground="gray", width=26)
         self.conn_lbl.pack(side="left", padx=6)
+        self.flip_v = tk.BooleanVar(value=self.cfg.get("video_flip_v", False))
+        self.flip_h = tk.BooleanVar(value=self.cfg.get("video_flip_h", False))
+        ttk.Checkbutton(bar, text="영상 상하 반전", variable=self.flip_v, command=self._apply_flip).pack(side="left", padx=4)
+        ttk.Checkbutton(bar, text="좌우 반전", variable=self.flip_h, command=self._apply_flip).pack(side="left", padx=4)
         self.estop_btn = tk.Button(bar, text="■ 비상 정지 (Space)", bg="#d32f2f", fg="white",
                                    activebackground="#b71c1c", font=("맑은 고딕", 13, "bold"),
                                    padx=14, command=self.estop)
         self.estop_btn.pack(side="right")
+
+    def _apply_flip(self):
+        """두 탭 영상에 반전 적용, 다음 실행을 위해 config.json에 저장."""
+        v, h = self.flip_v.get(), self.flip_h.get()
+        for view in (self.user.video, self.dev.video):
+            view.flip_v, view.flip_h = v, h
+        if (self.cfg.get("video_flip_v"), self.cfg.get("video_flip_h")) != (v, h):
+            self.cfg["video_flip_v"], self.cfg["video_flip_h"] = v, h
+            save_config(self.cfg)
 
     def _target(self) -> dict:
         if self.transport.current() == 1:

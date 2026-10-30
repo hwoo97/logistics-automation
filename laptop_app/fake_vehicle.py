@@ -252,7 +252,8 @@ class FakeVehicle:
         with self.lock:
             state, led, offset = self.state, self.led, self.offset
             pan, tilt, wheels = self.pan, self.tilt, list(self.wheels)
-        if state == "CHECK_SIGN" or tilt > 80:                # 카메라를 올린 장면: 표지판
+        sign_tilt = (POSES["JUNCTION"][1] + POSES["SIGN"][1]) / 2
+        if state == "CHECK_SIGN" or tilt >= sign_tilt:        # 카메라를 올린 장면: 표지판 (틸트는 클수록 위)
             d.rectangle((110, 60, 210, 160), fill="white", outline="black", width=4)
             letter = {Target.WORK: "W", Target.DROP_A: "A", Target.DROP_B: "B", Target.PARK: "P"}.get(self.target, "?")
             d.text((152, 100), letter, fill="black")
