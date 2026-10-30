@@ -63,7 +63,7 @@
 | 메시지 | 예시 | 의미 |
 |--------|------|------|
 | `DEV RANGE <m>` | `DEV RANGE 0.234` | 초음파 거리(m, 필터 적용) — `/ultrasonic/range` |
-| `DEV LINE <offset> <event>` | `DEV LINE -0.12 NONE` | 라인 오프셋(-1~1)과 이벤트 — `/line/state` |
+| `DEV LINE <offset> <event> [<raw_event>]` | `DEV LINE -0.12 NONE STOP_LINE` | 라인 오프셋(-1~1), 확정 이벤트, 이번 프레임 판정(확인 전, 생략 시 event와 같음) — `/line/state` |
 | `DEV SYS <temp_c> <cpu_pct> <mem_pct>` | `DEV SYS 52.1 37 41` | Pi CPU 온도·사용률·메모리 (1Hz) |
 | `DEV NODES <이름,...>` | `DEV NODES camera,led_node,motor_node` | `DEV NODES` 응답 |
 

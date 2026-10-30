@@ -241,7 +241,8 @@ class DevTab(ttk.Frame):
             self._draw_graph()
         elif kind == "LINE":
             self._draw_line(r["offset"])
-            self.line_lbl.config(text=f"오프셋 {r['offset']:+.2f}   이벤트 {r['event']}")
+            raw = r.get("raw_event", r["event"])
+            self.line_lbl.config(text=f"오프셋 {r['offset']:+.2f}   이벤트 {r['event']}   (판정 {raw})")
         elif kind == "SYS":
             self.sys_lbl.config(text=f"온도 {r['temp']:.1f}℃ / CPU {r['cpu']:.0f}% / 메모리 {r['mem']:.0f}%")
         elif kind == "NODES":

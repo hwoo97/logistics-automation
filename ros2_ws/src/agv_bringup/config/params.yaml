@@ -42,6 +42,20 @@ led_node:
     green_pin: 26
     gpio_chip: -1
 
+line_node:
+  ros__parameters:
+    enabled: true
+    roi_ratio: 0.33             # 아래쪽 1/3 — 띠 3개(먼·중간·가까운)로 나눔
+    black_v_range: [40, 110]    # 검정 밝기 문턱(Otsu)을 이 범위로 제한
+    black_s_max: 90             # 채도가 이보다 크면 색 마커 → 라인 아님
+    min_pixels: 60
+    column_fill: 0.4
+    edge_ratio: 0.05
+    stop_line_width_ratio: [2.0, 5.0]
+    ahead_center_ratio: 0.4
+    default_line_px: 20
+    confirm_frames: 3           # S1~S3에서 사진·주행으로 보정
+
 bt_bridge_node:
   ros__parameters:
     transport: rfcomm           # tcp 로 바꾸면 Wi-Fi/유선으로 노트북 앱 연결 시험 가능 (포트 tcp_port, 영상 +1)

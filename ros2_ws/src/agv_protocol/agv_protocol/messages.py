@@ -184,7 +184,7 @@ def format_pong() -> str:
 
 
 def format_dev(kind: str, *values) -> str:
-    """DEV RANGE 0.234 / DEV LINE -0.12 NONE / DEV SYS 52.1 37 41 / DEV NODES a,b,c"""
+    """DEV RANGE 0.234 / DEV LINE -0.12 NONE [STOP_LINE] / DEV SYS 52.1 37 41 / DEV NODES a,b,c"""
     if kind == "NODES":
         return "DEV NODES " + ",".join(values[0]) if values and values[0] else "DEV NODES"
     return " ".join(["DEV", kind, *(_fmt(v) for v in values)])
@@ -215,8 +215,9 @@ def parse_reply(line: str) -> dict:
             kind = rest[0]
             if kind == "RANGE":
                 return {"type": "DEV", "kind": kind, "distance": float(rest[1])}
-            if kind == "LINE":
-                return {"type": "DEV", "kind": kind, "offset": float(rest[1]), "event": rest[2]}
+            if kind == "LINE":                  # DEV LINE <offset> <event> [<raw_event>]
+                return {"type": "DEV", "kind": kind, "offset": float(rest[1]), "event": rest[2],
+                        "raw_event": rest[3] if len(rest) > 3 else rest[2]}
             if kind == "SYS":
                 return {"type": "DEV", "kind": kind, "temp": float(rest[1]),
                         "cpu": float(rest[2]), "mem": float(rest[3])}

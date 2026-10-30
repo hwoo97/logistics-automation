@@ -99,6 +99,9 @@ def test_event_error_ack_nak():
 def test_dev_replies():
     assert format_dev("RANGE", 0.234) == "DEV RANGE 0.234"
     assert parse_reply("DEV RANGE 0.234")["distance"] == pytest.approx(0.234)
+    r = parse_reply(format_dev("LINE", -0.12, "NONE", "STOP_LINE"))
+    assert r["raw_event"] == "STOP_LINE"
+    assert parse_reply("DEV LINE 0.1 NONE")["raw_event"] == "NONE"      # 판정 생략 (이전 형식)
     r = parse_reply(format_dev("LINE", -0.12, "NONE"))
     assert (r["offset"], r["event"]) == (pytest.approx(-0.12), "NONE")
     r = parse_reply(format_dev("SYS", 52.1, 37.0, 41.0))

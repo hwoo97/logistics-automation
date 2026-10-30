@@ -102,6 +102,7 @@ float32 offset          # 라인 중심의 좌우 오차 (-1.0 ~ 1.0)
 bool    line_found
 string  event           # NONE / STOP_LINE / JUNCTION_T / JUNCTION_LEFT / JUNCTION_RIGHT
                         # CORNER_LEFT / CORNER_RIGHT / LINE_END
+string  raw_event       # 이번 프레임 판정 (연속 프레임 확인 전) — 검출 값 조정용
 
 # Status.msg
 string state            # 상태 머신 상태 이름

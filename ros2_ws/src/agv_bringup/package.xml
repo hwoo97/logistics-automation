@@ -11,6 +11,7 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>agv_hw</exec_depend>
   <exec_depend>agv_bt</exec_depend>
+  <exec_depend>agv_vision</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

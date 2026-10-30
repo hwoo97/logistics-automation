@@ -8,7 +8,7 @@ import time
 import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import Image, Range
 from std_msgs.msg import Bool, Float32MultiArray, String
 
@@ -38,6 +38,7 @@ class BtBridgeNode(Node):
         self.streamer = VideoStreamer(fps, size, quality)
         self.sys = SysMonitor()
         self._last_range_sent = 0.0
+        self._last_line_sent = 0.0
 
         q10 = QoSProfile(depth=10)
         self.pub_estop = self.create_publisher(Bool, "/safety/estop", q10)
@@ -48,6 +49,12 @@ class BtBridgeNode(Node):
         self.pub_wheels = self.create_publisher(Float32MultiArray, "/dev/wheels", QoSProfile(depth=1))
         self.create_subscription(Range, "/ultrasonic/range", self.on_range, qos_profile_sensor_data)
         self.create_subscription(Image, camera_topic, self.on_image, qos_profile_sensor_data)
+        try:                                                  # agv_interfaces가 없으면 LINE만 빠짐
+            from agv_interfaces.msg import LineState
+            self.create_subscription(LineState, "/line/state", self.on_line_state,
+                                     QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
+        except ImportError:
+            self.get_logger().warn("agv_interfaces 없음 — DEV LINE 보내지 않음")
 
         self.server = RfcommServer(on_line=self.on_line, on_connect=self.on_connect,
                                    transport=transport, tcp_port=tcp_port)
@@ -124,6 +131,12 @@ class BtBridgeNode(Node):
             self._last_range_sent = now
             if msg.range == msg.range and msg.range != float("inf"):    # NaN·inf 제외
                 self.send(format_dev("RANGE", round(msg.range, 3)))
+
+    def on_line_state(self, msg):
+        now = time.monotonic()
+        if "LINE" in self.core.watches and now - self._last_line_sent >= WATCH_PERIOD_S:
+            self._last_line_sent = now
+            self.send(format_dev("LINE", round(msg.offset, 2), msg.event or "NONE", msg.raw_event or "NONE"))
 
     def on_image(self, msg: Image):
         self.streamer.update(msg.encoding, msg.height, msg.width, msg.step, msg.data)
