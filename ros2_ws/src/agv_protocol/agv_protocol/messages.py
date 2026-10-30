@@ -29,11 +29,13 @@ ALLOWED_STATES = {
     "DEV POSE": _HW_STATES,
     "DEV SERVO": _HW_STATES,
     "DEV WHEEL": frozenset({"IDLE", "MANUAL"}),
+    "DEV SPEED": ALL_STATES,              # 주행 중에도 속도 조절
     "DEV WATCH": ALL_STATES,
     "DEV NODES": ALL_STATES,
 }
 
 WATCH_KEYS = ("RANGE", "LINE", "SYS")
+SPEED_RANGE = (0.2, 1.0)        # DEV SPEED — drive_node 기본 선속도
 
 
 @dataclass
@@ -87,6 +89,10 @@ def _validate_dev(cmd: Command) -> None:
             raise ValueError("DEV WHEEL: 바퀴 4개 듀티 필요")
         for i, v in enumerate(rest, 1):
             _number(v, -1.0, 1.0, f"L{i}")
+    elif sub == "SPEED":
+        if len(rest) != 1:
+            raise ValueError("DEV SPEED: 주행 기본 속도 1개 필요 (0.2~1.0)")
+        _number(rest[0], SPEED_RANGE[0], SPEED_RANGE[1], "speed")
     elif sub == "WATCH":
         if len(rest) != 2 or rest[0] not in (*WATCH_KEYS, "ALL") or rest[1] not in ("ON", "OFF"):
             raise ValueError("DEV WATCH: <RANGE|LINE|SYS|ALL> <ON|OFF>")
@@ -184,7 +190,7 @@ def format_pong() -> str:
 
 
 def format_dev(kind: str, *values) -> str:
-    """DEV RANGE 0.234 / DEV LINE -0.12 NONE [STOP_LINE] / DEV SYS 52.1 37 41 / DEV NODES a,b,c"""
+    """DEV RANGE 0.234 / DEV LINE -0.12 NONE [STOP_LINE [88.5]] / DEV SYS 52.1 37 41 / DEV NODES a,b,c"""
     if kind == "NODES":
         return "DEV NODES " + ",".join(values[0]) if values and values[0] else "DEV NODES"
     return " ".join(["DEV", kind, *(_fmt(v) for v in values)])
@@ -215,9 +221,11 @@ def parse_reply(line: str) -> dict:
             kind = rest[0]
             if kind == "RANGE":
                 return {"type": "DEV", "kind": kind, "distance": float(rest[1])}
-            if kind == "LINE":                  # DEV LINE <offset> <event> [<raw_event>]
+            if kind == "LINE":                  # DEV LINE <offset> <event> [<raw_event> [<angle|->]]
+                angle = rest[4] if len(rest) > 4 else "-"
                 return {"type": "DEV", "kind": kind, "offset": float(rest[1]), "event": rest[2],
-                        "raw_event": rest[3] if len(rest) > 3 else rest[2]}
+                        "raw_event": rest[3] if len(rest) > 3 else rest[2],
+                        "angle": None if angle == "-" else float(angle)}
             if kind == "SYS":
                 return {"type": "DEV", "kind": kind, "temp": float(rest[1]),
                         "cpu": float(rest[2]), "mem": float(rest[3])}

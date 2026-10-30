@@ -1,0 +1,9 @@
+# mission_node(또는 시험 명령) → drive_node (functional_design 사용자 정의 메시지)
+string command          # FOLLOW_TO_EVENT / STOP  (TURN_LEFT / TURN_RIGHT / STRAIGHT / UTURN / APPROACH는 다음 단계)
+---
+bool   success
+string result           # 끝난 이유: STOP_LINE / CORNER_LEFT / CORNER_RIGHT / LINE_END / STOPPED / E_LINE / E_ESTOP / E_UNSUPPORTED_*
+---
+float32 linear          # 현재 /cmd_vel 선속도
+float32 angular         # 현재 /cmd_vel 회전
+float32 offset          # 현재 라인 오프셋

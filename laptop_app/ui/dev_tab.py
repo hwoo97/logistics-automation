@@ -1,4 +1,5 @@
-"""개발자 탭 — 하드웨어 직접 조작(DEV), 측정값, 영상 상태·사진 저장, 메시지 콘솔."""
+"""개발자 탭 — 하드웨어 직접 조작(DEV), 측정값, 영상 상태·사진 저장, 주행 속도, 메시지 콘솔."""
+import math
 import os
 import time
 import tkinter as tk
@@ -6,11 +7,12 @@ from collections import deque
 from tkinter import filedialog, ttk
 
 import _paths  # noqa: F401
-from agv_protocol.messages import MOVE_REPEAT_S, WATCH_KEYS
+from agv_protocol.messages import MOVE_REPEAT_S, SPEED_RANGE, WATCH_KEYS
 from ui.video_view import VideoView
 
 CAPTURE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "captures")
 LOAD_DISTANCE, OBSTACLE_DISTANCE = 0.10, 0.15   # params.yaml 초기값 (그래프 기준선)
+DEFAULT_DRIVE_SPEED = 0.6                       # params.yaml drive_node.speed 초기값
 
 
 class DevTab(ttk.Frame):
@@ -26,7 +28,10 @@ class DevTab(ttk.Frame):
         top.pack(fill="x")
         self._build_controls(top).grid(row=0, column=0, sticky="nsw", padx=(0, 6))
         self._build_measure(top).grid(row=0, column=1, sticky="nsw", padx=(0, 6))
-        self._build_video(top).grid(row=0, column=2, sticky="n")
+        right = ttk.Frame(top)
+        right.grid(row=0, column=2, sticky="n")
+        self._build_video(right).pack(fill="x")
+        self._build_speed(right).pack(fill="x", pady=(6, 0))
         self._build_console(self).pack(fill="both", expand=True, pady=(6, 0))
 
     # ── 하드웨어 조작 ─────────────────────────────────────
@@ -44,7 +49,7 @@ class DevTab(ttk.Frame):
         pt.pack(fill="x", pady=(0, 4))
         for i, p in enumerate(("LINE", "JUNCTION", "SIGN")):
             ttk.Button(pt, text=p, width=9, command=lambda p=p: self.send("DEV", "POSE", p)).grid(row=0, column=i, padx=2, pady=2)
-        self.pan, self.tilt = tk.DoubleVar(value=65), tk.DoubleVar(value=150)
+        self.pan, self.tilt = tk.DoubleVar(value=70), tk.DoubleVar(value=130)
         for r, (name, var) in enumerate((("팬", self.pan), ("틸트", self.tilt)), start=1):
             ttk.Label(pt, text=name).grid(row=r, column=0, sticky="e")
             s = tk.Scale(pt, from_=0, to=180, orient="horizontal", variable=var, length=170, resolution=1)
@@ -119,7 +124,7 @@ class DevTab(ttk.Frame):
 
         ln = ttk.LabelFrame(f, text="라인 오프셋 · 이벤트  (/line/state)")
         ln.pack(fill="x", pady=(0, 4))
-        self.line_bar = tk.Canvas(ln, width=300, height=26, bg="white", highlightthickness=1)
+        self.line_bar = tk.Canvas(ln, width=300, height=60, bg="white", highlightthickness=1)
         self.line_bar.pack(padx=4, pady=2)
         self.line_lbl = ttk.Label(ln, text="-", font=("Consolas", 11))
         self.line_lbl.pack(anchor="w", padx=4)
@@ -148,12 +153,22 @@ class DevTab(ttk.Frame):
         if len(pts) >= 4:
             c.create_line(*pts, fill="#1976d2", width=2)
 
-    def _draw_line(self, offset):
-        c, w = self.line_bar, 300
+    def _draw_line(self, offset, angle=None):
+        """오프셋 = 아래쪽 위치, 각도 = 기울기. 연두 부채꼴 = 각도 보정 안 하는 범위(85~95°)."""
+        c, w, h = self.line_bar, 300, 60
         c.delete("all")
-        c.create_line(w / 2, 0, w / 2, 26, fill="gray")
-        x = w / 2 + offset * w / 2
-        c.create_rectangle(x - 5, 3, x + 5, 23, fill="black")
+        cx = w / 2
+        for a in (85, 95):                                   # 허용 범위 표시 (가운데 기준)
+            dx = h / math.tan(math.radians(a))
+            c.create_line(cx, h, cx + dx, 0, fill="#a5d6a7")
+        c.create_line(cx, 0, cx, h, fill="gray", dash=(2, 2))
+        x = cx + offset * w / 2
+        if angle is None:                                    # 각도를 못 믿으면 위치만
+            c.create_rectangle(x - 5, h - 20, x + 5, h - 2, fill="black")
+            return
+        dx = h / math.tan(math.radians(angle))
+        color = "black" if 85 <= angle <= 95 else "#d32f2f"
+        c.create_line(x, h, x + dx, 0, width=8, fill=color)
 
     # ── 영상 ─────────────────────────────────────────────
 
@@ -166,6 +181,27 @@ class DevTab(ttk.Frame):
         ttk.Button(f, text="사진 저장", command=self._save_snapshot).pack(anchor="w", padx=4, pady=(0, 4))
         self.get_latest_frame = lambda: None    # MainWindow가 지정
         return f
+
+    def _build_speed(self, master):
+        """주행 속도 (DEV SPEED → /drive/speed) — drive_node 기본 선속도, 주행 중에도 바로 적용."""
+        f = ttk.LabelFrame(master, text="주행 속도  (drive_node, 0.2~1.0)")
+        self.speed = tk.DoubleVar(value=DEFAULT_DRIVE_SPEED)
+        s = tk.Scale(f, from_=SPEED_RANGE[0], to=SPEED_RANGE[1], resolution=0.05, orient="horizontal",
+                     variable=self.speed, length=200)
+        s.grid(row=0, column=0, columnspan=3, sticky="w", padx=4)
+        s.bind("<ButtonRelease-1>", lambda e: self._send_speed())
+        for i, (text, step) in enumerate((("−", -0.05), ("+", 0.05))):
+            ttk.Button(f, text=text, width=3, command=lambda st=step: self._nudge_speed(st)).grid(row=1, column=i, padx=2, pady=2)
+        ttk.Label(f, text="놓으면 적용 · 주행 중에도", foreground="gray").grid(row=1, column=2, sticky="w")
+        return f
+
+    def _nudge_speed(self, step):
+        lo, hi = SPEED_RANGE
+        self.speed.set(round(min(hi, max(lo, self.speed.get() + step)), 2))
+        self._send_speed()
+
+    def _send_speed(self):
+        self.send("DEV", "SPEED", float(round(self.speed.get(), 2)))
 
     def _save_snapshot(self):
         jpeg = self.get_latest_frame()
@@ -240,9 +276,11 @@ class DevTab(ttk.Frame):
             self.range_lbl.config(text=f"{r['distance']:.3f} m")
             self._draw_graph()
         elif kind == "LINE":
-            self._draw_line(r["offset"])
+            self._draw_line(r["offset"], r.get("angle"))
             raw = r.get("raw_event", r["event"])
-            self.line_lbl.config(text=f"오프셋 {r['offset']:+.2f}   이벤트 {r['event']}   (판정 {raw})")
+            angle = r.get("angle")
+            ang = f"{angle:5.1f}°" if angle is not None else "  -  "
+            self.line_lbl.config(text=f"오프셋 {r['offset']:+.2f}   각도 {ang}\n이벤트 {r['event']}   (판정 {raw})")
         elif kind == "SYS":
             self.sys_lbl.config(text=f"온도 {r['temp']:.1f}℃ / CPU {r['cpu']:.0f}% / 메모리 {r['mem']:.0f}%")
         elif kind == "NODES":

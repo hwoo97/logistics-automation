@@ -1,10 +1,14 @@
 """라인 검출 (② 순수 로직) — BGR 영상 → 오프셋·이벤트 (functional_design F4, class_design 2.1·2.2).
 
 처리: 320×240 축소 → 아래쪽 roi_ratio 관심 영역 → 검정 마스크 → 연결 성분 → 띠 3개
-  라인 고르기  : 가까운 띠에 걸친 덩어리 중 점수 = 면적(행마다 라인 굵기 2배까지만) × 가운데 가중치 × 직전 위치 가중치
+  라인 고르기  : 줄마다 "라인만큼 가는" 구간(폭 ≤ max_line_px)만 라인 후보로 센다 — 두꺼운 물체는 붙어 있든
+                떨어져 있든 후보가 아님. 덩어리 점수 = 가는 구간 면적 × 가운데 가중치 × 직전 위치 가중치
                 × (화면 맨 아래에 닿으면 가산)
-                → 주변의 어두운 물체보다 차량 밑에서 들어오는 가운데 라인을 고른다
-  가까운 띠(아래): 고른 라인의 중심 → 오프셋 -1(왼쪽) ~ 1(오른쪽), 라인 굵기 추정
+  가까운 띠(아래): 고른 라인에서 줄마다 직전 위치에 가장 가까운 가는 구간의 중심 평균 → 오프셋 -1(왼쪽) ~ 1(오른쪽),
+                그 폭의 중앙값 → 라인 굵기 (max_line_px로 제한해 물체 폭이 기준이 되지 않게)
+  라인 각도    : 관심 영역 맨 아래 줄부터 위로, 줄마다 바로 아래 줄 위치에 가까운 가는 구간을 따라가 중심점을 모으고
+                직선 x = a·y + b로 맞춰 각도 계산 — 90° = 화면 위로 똑바로, 90° 미만 = 위쪽이 오른쪽으로 기움
+                (두 끝점만 쓰면 끝부분 흔들림에 민감해서 직선 맞춤)
   중간 띠       : 고른 라인과 **이어진** 가로 검은 영역 — 폭·화면 양끝 도달 → 정지선·코너
   먼 띠(위)     : 고른 라인과 이어진 가운데 쪽 세로 라인 = "앞쪽 라인 있음"
   (가중치는 라인 고르기에만 — 코너 라인은 화면 끝까지 뻗어야 하므로 이벤트는 "이어져 있는지"로 거른다)
@@ -34,6 +38,8 @@ class LineConfig:
     stop_line_width_ratio: tuple = (2.0, 5.0)   # 정지선 = 가로 폭이 라인 굵기의 2~5배
     ahead_center_ratio: float = 0.4     # 먼 띠에서 가운데 ±40% 안의 세로 라인 = 앞쪽 라인
     default_line_px: int = 20           # 라인 굵기 추정이 안 될 때
+    max_line_px: int = 45               # 한 줄에서 이보다 넓은 검은 구간은 라인이 아님 (두꺼운 물체, 붙은 물체)
+    angle_min_rows: int = 15            # 각도를 믿으려면 라인을 따라간 줄이 이만큼은 있어야 함
     center_weight_min: float = 0.3      # 라인 고르기 가중치: 가운데 1.0 → 화면 양끝 이 값
     prev_weight_min: float = 0.5        # 직전 라인 위치에서 화면 폭 절반만큼 떨어지면 이 값
     bottom_bonus: float = 1.5           # 화면 맨 아래(차량 바로 앞)에 닿는 덩어리 가산
@@ -46,6 +52,8 @@ class LineResult:
     line_found: bool
     event: LineEvent        # 확정된 이벤트 (연속 프레임 통과분만)
     raw_event: LineEvent    # 이번 프레임 판정 (확인 전)
+    angle: float = 90.0     # 라인 각도(도) — 90 = 똑바로, 90 미만 = 위쪽이 오른쪽으로 기움
+    angle_valid: bool = False
 
 
 class EventConfirmer:
@@ -97,7 +105,7 @@ class LineDetector:
         self.cfg = cfg or LineConfig()
         self.confirm = EventConfirmer(self.cfg.confirm_frames)
         self.offset = 0.0
-        self.line_px = float(self.cfg.default_line_px)     # 직전 라인 굵기 (넓은 물체 면적 제한에 사용)
+        self.line_px = float(self.cfg.default_line_px)     # 직전 라인 굵기 (정지선 폭 기준)
 
     def process(self, bgr: np.ndarray) -> LineResult:
         c = self.cfg
@@ -112,42 +120,93 @@ class LineDetector:
             return LineResult(round(self.offset, 3), False, self.confirm.push(raw), raw)
         line = np.where(labels == line_id, 255, 0).astype(np.uint8)   # 고른 라인 + 이어진 갈래만
         far, mid, near = line[: h // 3], line[h // 3: 2 * h // 3], line[2 * h // 3:]
-        self.offset, self.line_px = self.center_offset(near)
+        centered = self.center_offset(near)
+        if centered is None:                                  # 가까운 띠가 전부 두꺼움 (물체에 덮임)
+            raw = LineEvent.LINE_END
+            return LineResult(round(self.offset, 3), False, self.confirm.push(raw), raw)
+        self.offset, self.line_px = centered
         raw = self.detect_event(mid, far, self.line_px)
-        return LineResult(round(self.offset, 3), True, self.confirm.push(raw), raw)
+        angle = self.line_angle(line)
+        return LineResult(round(self.offset, 3), True, self.confirm.push(raw), raw,
+                          round(angle, 1) if angle is not None else 90.0, angle is not None)
+
+    def line_angle(self, line: np.ndarray) -> float | None:
+        """관심 영역 전체에서 라인을 아래→위로 따라가 직선을 맞춘 각도(도). 줄이 부족하면 None.
+        줄마다 바로 아래 중심에서 max_line_px 안쪽의 가는 구간만 이어 붙임 — 코너·정지선 가로선은 넓어서 빠짐."""
+        c = self.cfg
+        ref = (self.offset + 1) * c.width / 2
+        ys, xs = [], []
+        for y in range(line.shape[0] - 1, -1, -1):
+            runs = self._thin_runs(line[y] > 0, ref)
+            if runs:
+                a, b = runs[0]
+                x = (a + b) / 2
+                if abs(x - ref) > c.max_line_px:                 # 다른 덩어리로 건너뜀 방지
+                    continue
+                ref = x
+                ys.append(y)
+                xs.append(x)
+        if len(ys) < c.angle_min_rows or max(ys) - min(ys) < c.angle_min_rows:
+            return None
+        a, _ = np.polyfit(np.array(ys, float), np.array(xs, float), 1)    # x = a·y + b (y는 아래로 증가)
+        return float(np.degrees(np.arctan2(1.0, -a)))                     # 위로 한 줄 갈 때 x가 −a만큼
+
+    def _thin_runs(self, row: np.ndarray, ref_x: float):
+        """한 줄의 검은 구간 중 폭 ≤ max_line_px 인 것, ref_x에 가까운 순."""
+        runs = [(a, b) for a, b in _spans(row) if b - a + 1 <= self.cfg.max_line_px]
+        return sorted(runs, key=lambda r: abs((r[0] + r[1]) / 2 - ref_x))
 
     def select_line(self, labels: np.ndarray, h: int) -> int | None:
-        """가까운 띠에 걸친 덩어리 중 라인 하나. 점수 = 면적(행마다 라인 굵기 2배까지만) × 가운데 가중치
-        × 직전 위치 가중치 × 아래 닿음 가산 — 넓은 어두운 물체가 면적만으로 이기지 못하게."""
+        """가까운 띠에 걸친 덩어리 중 라인 하나. 점수 = 가는 구간(폭 ≤ max_line_px) 면적 × 가운데 가중치
+        × 직전 위치 가중치 × 아래 닿음 가산 — 두꺼운 물체는 가는 구간이 없어 후보가 되지 못함."""
         c = self.cfg
         near = labels[2 * h // 3:]
         half = c.width / 2
         prev_x = (self.offset + 1) * half
-        cap = 2 * max(self.line_px, c.default_line_px)
         best = None
         for i in np.unique(near):
             if i == 0:
                 continue
-            ys, xs = np.nonzero(near == i)
-            if len(xs) < c.min_pixels:
+            comp = near == i
+            if comp.sum() < c.min_pixels:
                 continue
-            cx = xs.mean()
+            widths, centers, bottom = [], [], False
+            for y in range(comp.shape[0]):
+                runs = self._thin_runs(comp[y], prev_x)
+                if runs:
+                    a, b = runs[0]
+                    widths.append(b - a + 1)
+                    centers.append((a + b) / 2)
+                    bottom |= y >= comp.shape[0] - 2
+            area = sum(widths)
+            if area < c.min_pixels / 2:
+                continue
+            cx = float(np.mean(centers))
             w_center = 1.0 - (1.0 - c.center_weight_min) * min(1.0, abs(cx - half) / half)
             w_prev = 1.0 - (1.0 - c.prev_weight_min) * min(1.0, abs(cx - prev_x) / half)
-            bonus = c.bottom_bonus if ys.max() >= near.shape[0] - 2 else 1.0
-            area = np.minimum(np.bincount(ys), cap).sum()          # 행마다 cap까지만 셈
+            bonus = c.bottom_bonus if bottom else 1.0
             score = area * w_center * w_prev * bonus
             if best is None or score > best[0]:
                 best = (score, int(i))
         return None if best is None else best[1]
 
-    def center_offset(self, near: np.ndarray) -> tuple[float, float]:
-        """고른 라인(가까운 띠)의 (오프셋, 라인 굵기 px)."""
+    def center_offset(self, near: np.ndarray) -> tuple[float, float] | None:
+        """고른 라인(가까운 띠)의 (오프셋, 라인 굵기 px). 아래 줄부터 위로, 줄마다 바로 아래 줄 위치에 가장 가까운
+        가는 구간을 따라간다 — 붙어 있는 두꺼운 물체 줄은 건너뜀. 가는 구간이 하나도 없으면 None."""
         c = self.cfg
-        ys, xs = np.nonzero(near)
-        rows = max(1, len(np.unique(ys)))
-        offset = float(np.clip((xs.mean() - c.width / 2) / (c.width / 2), -1.0, 1.0))
-        return offset, len(xs) / rows
+        ref = (self.offset + 1) * c.width / 2
+        centers, widths = [], []
+        for y in range(near.shape[0] - 1, -1, -1):
+            runs = self._thin_runs(near[y] > 0, ref)
+            if runs:
+                a, b = runs[0]
+                ref = (a + b) / 2
+                centers.append(ref)
+                widths.append(b - a + 1)
+        if not centers:
+            return None
+        offset = float(np.clip((np.mean(centers) - c.width / 2) / (c.width / 2), -1.0, 1.0))
+        return offset, float(np.median(widths))
 
     def detect_event(self, mid, far, line_px) -> LineEvent:
         """F4 판단표 — 고른 라인과 이어진 영역에서 중간 띠의 가로 폭·양끝 도달, 먼 띠의 앞쪽 라인.

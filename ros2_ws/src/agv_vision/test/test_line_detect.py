@@ -143,6 +143,82 @@ def test_dark_object_does_not_hide_corner():
     assert run(img).event == LineEvent.CORNER_RIGHT
 
 
+def test_thick_object_near_center_not_chosen():
+    """가운데 가까이 있는 두꺼운 검정 물체(폭 80px, 아래까지 닿음) — 2026-10-30 S1에서 오프셋이 끌려간 경우."""
+    img = floor()
+    vline(img, 160)
+    img[150:240, 55:135] = 30                     # 라인과 15px 떨어짐
+    r = run(img)
+    assert r.line_found and abs(r.offset) < 0.05
+
+
+def test_thick_object_touching_line_does_not_pull_offset():
+    """라인에 붙은 두꺼운 물체 — 한 덩어리가 돼도 줄마다 가는 구간(라인)만 따라감."""
+    img = floor()
+    vline(img, 160)
+    img[222:240, 170:260] = 30                    # 라인 오른쪽에 붙음 (가까운 띠 아래쪽 절반)
+    r = run(img)
+    assert r.line_found and abs(r.offset) < 0.05
+
+
+def test_thick_object_does_not_inflate_line_width():
+    """두꺼운 물체를 본 뒤에도 라인 굵기 기준이 커지지 않아 정지선 판정이 유지됨."""
+    det = LineDetector(LineConfig())
+    img = floor()
+    vline(img, 160)
+    img[150:240, 55:135] = 30
+    for _ in range(3):
+        det.process(img)
+    stop = floor()
+    vline(stop, 160)
+    hline(stop, 110, 210)
+    for _ in range(3):
+        r = det.process(stop)
+    assert r.event == LineEvent.STOP_LINE and det.line_px <= LineConfig().max_line_px
+
+
+def slanted(x_bottom, x_top, y0=0):
+    """아래 x_bottom → 위 x_top으로 기운 라인 (굵기 LW)."""
+    import cv2
+    img = floor()
+    cv2.line(img, (x_bottom, H - 1), (x_top, y0), (25, 25, 25), LW)
+    return img
+
+
+@pytest.mark.parametrize("x_bottom, x_top, want", [
+    (160, 160, 90.0),          # 똑바로
+    (140, 220, None),          # 위쪽이 오른쪽 → 90° 미만
+    (180, 100, None),          # 위쪽이 왼쪽 → 90° 초과
+])
+def test_line_angle(x_bottom, x_top, want):
+    import math
+    r = run(slanted(x_bottom, x_top))
+    expect = math.degrees(math.atan2(H - 1, x_top - x_bottom)) if want is None else want
+    assert r.angle_valid and abs(r.angle - expect) < 2.0
+
+
+def test_angle_sign_matches_tilt():
+    right = run(slanted(140, 220))
+    left = run(slanted(180, 100))
+    assert right.angle < 85 and left.angle > 95
+
+
+def test_angle_ignores_corner_horizontal():
+    """코너의 가로선은 넓어서 각도 계산에서 빠짐 — 세로 라인 각도 그대로."""
+    img = floor()
+    vline(img, 160, MID_Y[0], H)
+    hline(img, 0, 170)
+    r = run(img)
+    assert r.angle_valid and abs(r.angle - 90) < 3
+
+
+def test_angle_invalid_when_too_short():
+    img = floor()
+    vline(img, 160, 232, H)                       # 아래 8줄만
+    r = run(img)
+    assert not r.angle_valid and r.angle == 90.0
+
+
 def test_side_object_only_is_line_end():
     img = floor()
     img[170:240, 0:60] = 30

@@ -17,7 +17,7 @@ pantilt_node:
     tilt_channel: 1
     settle_s: 0.3
     poses:                      # [팬, 틸트] 도 — 2026-10-29 S0: 팬 65 = 정면, 틸트는 클수록 위 (150 전방 아래, 180 전방)
-      LINE: [65, 150]
+      LINE: [70, 130]           # 2026-10-30 S1: 라인이 잘 보이는 각도 (사용자)
       JUNCTION: [65, 165]       # 초기값 — 분기점 마커가 보이는 각도로 S5에서 보정
       SIGN: [65, 180]
     i2c_bus: 1
@@ -54,10 +54,27 @@ line_node:
     stop_line_width_ratio: [2.0, 5.0]
     ahead_center_ratio: 0.4
     default_line_px: 20
+    angle_min_rows: 15          # 라인 각도를 믿으려면 따라간 줄이 이만큼 필요
+    max_line_px: 45            # 한 줄에서 이보다 넓은 검은 구간은 라인 아님 (두꺼운 물체) — 실제 라인 굵기(px) 보고 조정
     center_weight_min: 0.3      # 라인 고르기: 가운데 1.0 → 양끝 0.3 (주변 어두운 물체 대신 가운데 라인)
     prev_weight_min: 0.5        # 직전 라인 위치에서 멀수록 낮춤
     bottom_bonus: 1.5           # 화면 맨 아래(차량 바로 앞)에 닿는 덩어리 가산
     confirm_frames: 3           # S1~S3에서 사진·주행으로 보정
+
+drive_node:
+  ros__parameters:
+    rate_hz: 20.0
+    speed: 0.6                  # 기본 선속도 (-1~1). TT 모터는 낮으면 바닥에서 안 움직임 — S1에서 보정
+    min_speed: 0.45             # 감속해도 이 아래로는 안 내림 (모터 시동 문턱)
+    slow_gain: 0.5              # 선속도 = speed × (1 − slow_gain × |오프셋|)
+    event_speed: 0.45           # 이벤트 판정이 보이기 시작하면 감속
+    kp: 0.8                     # 회전 = −(kp·오프셋 + kd·변화율), 라인이 오른쪽(+)이면 오른쪽으로
+    ki: 0.0
+    kd: 0.15
+    kh: 0.5                     # 라인 각도 보정 비율 (각도 오차 45°일 때 회전 0.5)
+    heading_deadband_deg: 5.0   # 85~95°는 각도 보정 안 함
+    max_angular: 0.6
+    line_timeout_s: 0.5         # 라인 상태가 끊기면 정지 (E_LINE)
 
 bt_bridge_node:
   ros__parameters:

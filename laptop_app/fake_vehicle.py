@@ -22,7 +22,7 @@ from agv_protocol.messages import (
 )
 from agv_protocol.types import CARGO_LED, CARGO_TARGET, Cargo, Target
 
-POSES = {"LINE": (65, 150), "JUNCTION": (65, 165), "SIGN": (65, 180)}
+POSES = {"LINE": (70, 130), "JUNCTION": (65, 165), "SIGN": (65, 180)}
 MISSION_STATES = {"UTURN", "NAVIGATE", "AT_JUNCTION", "CHECK_SIGN", "APPROACH", "LOAD", "UNLOAD", "PARKED"}
 FAKE_NODES = ["camera", "line_node", "marker_node", "classifier_node", "drive_node", "mission_node",
               "motor_node", "pantilt_node", "ultrasonic_node", "led_node", "bt_bridge_node"]
@@ -47,6 +47,7 @@ class FakeVehicle:
         self.link_lost = False
         self.cycle = 0
         self.offset = 0.0
+        self.drive_speed = 0.6                     # DEV SPEED (drive_node 기본 속도 흉내)
 
     # ── 로그·전송 ─────────────────────────────────────────
 
@@ -147,6 +148,8 @@ class FakeVehicle:
             self.pan, self.tilt = float(rest[0]), float(rest[1])
         elif sub == "WHEEL":
             self.wheels, self.last_wheel = [float(v) for v in rest], now
+        elif sub == "SPEED":
+            self.drive_speed = float(rest[0])
         elif sub == "WATCH":
             keys = WATCH_KEYS if rest[0] == "ALL" else (rest[0],)
             for k in keys:
@@ -228,7 +231,9 @@ class FakeVehicle:
                 if "RANGE" in self.watches:
                     self.send(format_dev("RANGE", round(self._range(now), 3)))
                 if "LINE" in self.watches:
-                    self.send(format_dev("LINE", round(self.offset, 2), self._line_event()))
+                    ev = self._line_event()
+                    angle = round(90 - 25 * self.offset + 6 * math.sin(now * 0.7), 1)   # 각도 흉내
+                    self.send(format_dev("LINE", round(self.offset, 2), ev, ev, angle))
             if n % 20 == 0 and "SYS" in self.watches:         # 1Hz
                 self.send(format_dev("SYS", round(48 + 4 * math.sin(now / 7), 1),
                                      float(random.randint(20, 45)), 38.0))
@@ -266,7 +271,7 @@ class FakeVehicle:
             if state in ("CHECK_SIGN", "APPROACH"):
                 d.rectangle((90, 200, 230, 212), fill="black")
         d.rectangle((0, 0, 320, 18), fill=(40, 40, 40))
-        d.text((4, 3), f"FAKE  {state}  pan {pan:.0f} tilt {tilt:.0f}", fill="white")
+        d.text((4, 3), f"FAKE  {state}  pan {pan:.0f} tilt {tilt:.0f}  spd {self.drive_speed:.2f}", fill="white")
         color = {"RED": "red", "GREEN": "lime", "ERROR": "orange"}.get(led, (90, 90, 90))
         d.ellipse((298, 2, 314, 16), fill=color)
         if any(wheels):

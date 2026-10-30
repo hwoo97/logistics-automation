@@ -4,3 +4,5 @@ bool    line_found
 string  event           # 확정 이벤트: NONE / STOP_LINE / JUNCTION_T / JUNCTION_LEFT / JUNCTION_RIGHT
                         #             CORNER_LEFT / CORNER_RIGHT / LINE_END
 string  raw_event       # 이번 프레임 판정 (연속 프레임 확인 전) — 검출 값 조정용
+float32 angle           # 라인 각도(도) — 90 = 똑바로, 90 미만 = 위쪽이 오른쪽으로 기움
+bool    angle_valid     # 라인을 따라간 줄이 충분해 각도를 믿을 수 있음

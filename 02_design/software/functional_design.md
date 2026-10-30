@@ -86,6 +86,7 @@
 | `/mission/status` | agv_interfaces/Status | mission_node → bt_bridge | 2Hz + 변화 시 | 상태, 작업 횟수, 화물, 목적지 |
 | `/safety/estop` | std_msgs/Bool | bt_bridge·mission → motor_node | 이벤트 | 비상 정지 래치 |
 | `/dev/wheels` | std_msgs/Float32MultiArray | bt_bridge → motor_node | 0.3초 반복 | 개발자 탭: L1~L4 듀티 (-1~1), 워치독 적용 |
+| `/drive/speed` | std_msgs/Float32 | bt_bridge → drive_node | 이벤트 | 개발자 탭 "주행 속도": 라인 주행 기본 선속도 (0.2~1.0), 주행 중에도 적용 |
 | `/dev/pantilt_angle` | std_msgs/Float32MultiArray | bt_bridge → pantilt_node | 이벤트 | 개발자 탭: [팬, 틸트] 각도 |
 
 ### 서비스 / 액션
@@ -103,6 +104,8 @@ bool    line_found
 string  event           # NONE / STOP_LINE / JUNCTION_T / JUNCTION_LEFT / JUNCTION_RIGHT
                         # CORNER_LEFT / CORNER_RIGHT / LINE_END
 string  raw_event       # 이번 프레임 판정 (연속 프레임 확인 전) — 검출 값 조정용
+float32 angle           # 라인 각도(도) — 90 = 똑바로, 90 미만 = 위쪽이 오른쪽으로 기움
+bool    angle_valid
 
 # Status.msg
 string state            # 상태 머신 상태 이름
@@ -248,8 +251,8 @@ def choose_branch(markers, target):          # markers: {"left": [...], "front":
 
 ### F4 · 라인 추종 (`line_node` + `drive_node`)
 - 처리: 영상 320×240으로 축소 → 하단 1/3 관심 영역 → 검정 추출(HSV: 어둡고 Otsu + 채도 낮음, 색 마커 제외) → 연결 성분
-- 라인 고르기 (2026-10-30, 주변 어두운 물체 대책): 가까운 띠에 걸친 덩어리 중 점수 = 면적(행마다 라인 굵기 2배까지) × 가운데 가중치(양끝 0.3) × 직전 위치 가중치 × 화면 맨 아래에 닿으면 1.5배. 이벤트 판정은 **고른 라인과 이어진 영역만** 사용 — 가중치를 이벤트에 쓰면 화면 끝까지 뻗는 코너 라인을 놓치므로
-- 오프셋: 고른 라인의 가까운 띠(관심 영역 아래 1/3) 중심 x → -1.0 ~ 1.0, 라인을 못 찾으면 마지막 값 유지 + LINE_END
+- 라인 고르기 (2026-10-30, 주변 어두운 물체 대책): 줄마다 **폭 ≤ max_line_px(45px)인 가는 구간만** 라인 후보 — 두꺼운 물체는 붙어 있든 떨어져 있든 제외. 덩어리 점수 = 가는 구간 면적 × 가운데 가중치(양끝 0.3) × 직전 위치 가중치 × 화면 맨 아래에 닿으면 1.5배. 이벤트 판정은 **고른 라인과 이어진 영역만** 사용 — 가중치를 이벤트에 쓰면 화면 끝까지 뻗는 코너 라인을 놓치므로
+- 오프셋: 고른 라인의 가까운 띠(관심 영역 아래 1/3)에서 아래 줄부터 위로, 줄마다 바로 아래 줄 위치에 가까운 가는 구간 중심의 평균 → -1.0 ~ 1.0. 라인을 못 찾으면 마지막 값 유지 + LINE_END
 - 이벤트 검출 (위쪽 행 기준)
   | 이벤트 | 판단 |
   |---|---|
@@ -257,7 +260,8 @@ def choose_branch(markers, target):          # markers: {"left": [...], "front":
   | ~~JUNCTION_T / LEFT / RIGHT~~ | **판정 안 함 — 분기점은 색 마커 인식이 맡음 (2026-10-30 결정)**. T자·옆 갈래 모양은 NONE, 마커를 놓쳐 T자에서 라인이 끊기면 LINE_END로 정지 |
   | CORNER_LEFT / RIGHT | 앞쪽 라인 없음 + 한쪽으로만 가로 라인 |
   | LINE_END | 관심 영역에 라인 없음 |
-- `drive_node` PID: 각속도 z = Kp·e + Kd·Δe (Ki는 필요 시), 선속도는 오차가 크면 감속. 이벤트 검출 시 감속 → 정지
+- 라인 각도 (2026-10-30, 차량이 비스듬하면 라인이 대각선으로 보이는 문제): 관심 영역 맨 아래부터 위로 줄마다 라인 중심을 따라가 직선을 맞춰 각도 계산(90° = 똑바로, 90° 미만 = 위쪽이 오른쪽). 끝점 2개 대신 직선 맞춤 — 끝부분 흔들림에 덜 민감
+- `drive_node` PID: 각속도 z = −(Kp·e + Kd·Δe + Kh·각도 오차/45°) (Ki는 필요 시), 각도 오차는 85~95° 밖으로 벗어난 만큼만(`heading_deadband_deg` 5°). 선속도는 오차가 크면 감속. 이벤트 검출 시 감속 → 정지
 - 같은 이벤트가 연속 3프레임 이상일 때만 확정 (노이즈 방지)
 
 ### F5 · 직각 회전·유턴 (`drive_node`)

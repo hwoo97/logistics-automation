@@ -10,7 +10,7 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import Image, Range
-from std_msgs.msg import Bool, Float32MultiArray, String
+from std_msgs.msg import Bool, Float32, Float32MultiArray, String
 
 from agv_bt.bridge_core import BridgeCore
 from agv_bt.rfcomm_server import RfcommServer
@@ -47,6 +47,7 @@ class BtBridgeNode(Node):
         self.pub_pose = self.create_publisher(String, "/pantilt/pose", q10)
         self.pub_angle = self.create_publisher(Float32MultiArray, "/dev/pantilt_angle", q10)
         self.pub_wheels = self.create_publisher(Float32MultiArray, "/dev/wheels", QoSProfile(depth=1))
+        self.pub_speed = self.create_publisher(Float32, "/drive/speed", q10)
         self.create_subscription(Range, "/ultrasonic/range", self.on_range, qos_profile_sensor_data)
         self.create_subscription(Image, camera_topic, self.on_image, qos_profile_sensor_data)
         try:                                                  # agv_interfaces가 없으면 LINE만 빠짐
@@ -90,6 +91,9 @@ class BtBridgeNode(Node):
 
     def wheels(self, values):
         self.pub_wheels.publish(Float32MultiArray(data=[float(v) for v in values]))
+
+    def speed(self, value):
+        self.pub_speed.publish(Float32(data=float(value)))
 
     def node_names(self):
         return self.get_node_names()
@@ -136,7 +140,8 @@ class BtBridgeNode(Node):
         now = time.monotonic()
         if "LINE" in self.core.watches and now - self._last_line_sent >= WATCH_PERIOD_S:
             self._last_line_sent = now
-            self.send(format_dev("LINE", round(msg.offset, 2), msg.event or "NONE", msg.raw_event or "NONE"))
+            angle = round(msg.angle, 1) if msg.angle_valid else "-"
+            self.send(format_dev("LINE", round(msg.offset, 2), msg.event or "NONE", msg.raw_event or "NONE", angle))
 
     def on_image(self, msg: Image):
         self.streamer.update(msg.encoding, msg.height, msg.width, msg.step, msg.data)

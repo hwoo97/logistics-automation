@@ -17,6 +17,7 @@ from agv_protocol.types import Cargo, State, Target
     ("DEV WHEEL 0.3 0.3 0 -1", "DEV", ["WHEEL", "0.3", "0.3", "0", "-1"]),
     ("DEV WATCH ALL ON", "DEV", ["WATCH", "ALL", "ON"]),
     ("DEV NODES", "DEV", ["NODES"]),
+    ("DEV speed 0.55", "DEV", ["SPEED", "0.55"]),
 ])
 def test_parse_valid(line, kind, args):
     cmd = parse_command(line)
@@ -27,6 +28,7 @@ def test_parse_valid(line, kind, args):
     "", "START", "START 0", "START 10", "START 2.5", "STOP 1", "MANUAL MAYBE", "MOVE 1.5 0",
     "MOVE a b", "DEV", "DEV LED BLUE", "DEV SERVO 90", "DEV SERVO 200 90", "DEV WHEEL 0 0 0",
     "DEV WHEEL 2 0 0 0", "DEV WATCH RANGE", "DEV WATCH FOO ON", "DEV NODES x", "DEV FOO", "JUMP",
+    "DEV SPEED", "DEV SPEED 0.1", "DEV SPEED 1.5", "DEV SPEED fast", "DEV SPEED 0.5 0.5",
 ])
 def test_parse_invalid(line):
     with pytest.raises(ValueError):
@@ -56,6 +58,8 @@ def test_command_key():
     ("DEV WHEEL 0 0 0 0", "ESTOP", False),
     ("DEV WHEEL 0 0 0 0", "MANUAL", True),
     ("DEV WATCH SYS ON", "NAVIGATE", True),
+    ("DEV SPEED 0.6", "NAVIGATE", True),       # 주행 중에도
+    ("DEV SPEED 0.6", "ESTOP", True),
 ])
 def test_check_allowed(line, state, ok):
     assert (check_allowed(parse_command(line), state) is None) == ok
@@ -102,6 +106,9 @@ def test_dev_replies():
     r = parse_reply(format_dev("LINE", -0.12, "NONE", "STOP_LINE"))
     assert r["raw_event"] == "STOP_LINE"
     assert parse_reply("DEV LINE 0.1 NONE")["raw_event"] == "NONE"      # 판정 생략 (이전 형식)
+    assert parse_reply("DEV LINE 0.1 NONE NONE 87.5")["angle"] == pytest.approx(87.5)
+    assert parse_reply("DEV LINE 0.1 NONE NONE -")["angle"] is None     # 각도 못 믿음
+    assert parse_reply("DEV LINE 0.1 NONE")["angle"] is None
     r = parse_reply(format_dev("LINE", -0.12, "NONE"))
     assert (r["offset"], r["event"]) == (pytest.approx(-0.12), "NONE")
     r = parse_reply(format_dev("SYS", 52.1, 37.0, 41.0))

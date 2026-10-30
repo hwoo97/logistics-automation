@@ -24,6 +24,8 @@ class LineNode(Node):
             stop_line_width_ratio=tuple(p("stop_line_width_ratio", list(d.stop_line_width_ratio)).value),
             ahead_center_ratio=p("ahead_center_ratio", d.ahead_center_ratio).value,
             default_line_px=p("default_line_px", d.default_line_px).value,
+            max_line_px=p("max_line_px", d.max_line_px).value,
+            angle_min_rows=p("angle_min_rows", d.angle_min_rows).value,
             center_weight_min=p("center_weight_min", d.center_weight_min).value,
             prev_weight_min=p("prev_weight_min", d.prev_weight_min).value,
             bottom_bonus=p("bottom_bonus", d.bottom_bonus).value,
@@ -55,7 +57,8 @@ class LineNode(Node):
             return
         r = self.detector.process(bgr)
         self.pub.publish(LineState(offset=float(r.offset), line_found=r.line_found,
-                                   event=r.event.value, raw_event=r.raw_event.value))
+                                   event=r.event.value, raw_event=r.raw_event.value,
+                                   angle=float(r.angle), angle_valid=r.angle_valid))
 
 
 def main(args=None):

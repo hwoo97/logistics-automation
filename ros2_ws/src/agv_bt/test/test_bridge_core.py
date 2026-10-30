@@ -38,12 +38,15 @@ def test_ping(core):
 
 def test_dev_commands_reach_io(core):
     c, io = core
-    for line in ("DEV LED RED", "DEV POSE SIGN", "DEV SERVO 120 60", "DEV WHEEL 0.3 -0.3 0 0", "DEV NODES"):
+    for line in ("DEV LED RED", "DEV POSE SIGN", "DEV SERVO 120 60", "DEV WHEEL 0.3 -0.3 0 0", "DEV SPEED 0.7",
+                 "DEV NODES"):
         c.on_line(line)
     assert ("led", "RED") in io.calls and ("pose", "SIGN") in io.calls
     assert ("servo", 120.0, 60.0) in io.calls and ("wheels", [0.3, -0.3, 0.0, 0.0]) in io.calls
+    assert ("speed", 0.7) in io.calls
     assert io.sent[-1] == "DEV NODES camera,led_node"
-    assert [r["command"] for r in io.replies("ACK")] == ["DEV LED", "DEV POSE", "DEV SERVO", "DEV WHEEL", "DEV NODES"]
+    assert [r["command"] for r in io.replies("ACK")] == ["DEV LED", "DEV POSE", "DEV SERVO", "DEV WHEEL", "DEV SPEED",
+                                                         "DEV NODES"]
 
 
 def test_watch(core):

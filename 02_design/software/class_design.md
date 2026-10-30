@@ -311,7 +311,7 @@ classDiagram
 ```python
 @dataclass
 class DriveConfig:
-    speed: float = 0.4              # 기본 선속도 (-1~1 비율)
+    speed: float = 0.6              # 기본 선속도 (-1~1 비율) — 2026-10-30 구현: TT 모터 시동 문턱 때문에 0.4 → 0.6, min_speed 0.45·slow_gain·event_speed·kp·kd·max_angular·line_timeout_s 추가 (agv_control/drive.py)
     approach_speed: float = 0.2
     turn_speed: float = 0.5
     pre_turn_forward_s: float = 0.3 # 회전 전 차체 반 길이 전진 시간
