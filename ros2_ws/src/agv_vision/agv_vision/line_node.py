@@ -1,5 +1,7 @@
-"""line_node — /camera/image_raw(최신 1장) → LineDetector → /line/state (F4). 파라미터 enabled로 끄고 켬.
+"""line_node — /camera/image_raw(최신 1장) → LineDetector → /line/state, StopLineDetector → /stop_line/state (F4).
+영상 노드를 줄이려고 정지선 판정도 여기서 같은 프레임으로 한다 (2026-11-02). 파라미터 enabled로 끄고 켬.
 /line/tune(String "CONFIRM 3"·"LINE_END 10", 노트북 앱 DEV TUNE)으로 확정 프레임 수를 실행 중에 바꾼다."""
+import cv2
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
@@ -7,8 +9,9 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
 from agv_bt.video_streamer import to_bgr
-from agv_interfaces.msg import LineState
+from agv_interfaces.msg import LineState, StopLineState
 from agv_vision.line_detect import LineConfig, LineDetector
+from agv_vision.stop_line import StopLineConfig, StopLineDetector
 
 
 class LineNode(Node):
@@ -38,8 +41,30 @@ class LineNode(Node):
         )
         self.enabled = p("enabled", True).value
         self.detector = LineDetector(cfg)
-        self.pub = self.create_publisher(LineState, "/line/state",
-                                         QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
+        s = StopLineConfig()
+        stop_cfg = StopLineConfig(                      # 검정 추출·라인 굵기는 라인과 같은 값, 나머지는 stop_ 파라미터
+            roi_ratio=p("stop_roi_ratio", s.roi_ratio).value,
+            black_ratio=cfg.black_ratio,
+            black_v_max=cfg.black_v_max,
+            black_s_max=cfg.black_s_max,
+            black_blur=cfg.black_blur,
+            default_line_px=cfg.default_line_px,
+            max_line_px=cfg.max_line_px,
+            width_ratio=tuple(p("stop_width_ratio", list(s.width_ratio)).value),
+            min_thickness=p("stop_min_thickness", s.min_thickness).value,
+            side_min_ratio=p("stop_side_min_ratio", s.side_min_ratio).value,
+            gap_cols=p("stop_gap_cols", s.gap_cols).value,
+            max_tilt_deg=p("stop_max_tilt_deg", s.max_tilt_deg).value,
+            edge_ratio=cfg.edge_ratio,
+            confirm_frames=cfg.confirm_frames,
+            hold_frames=p("stop_hold_frames", s.hold_frames).value,
+            hold_max_thick=p("stop_hold_max_thick", s.hold_max_thick).value,
+        )
+        self.stop_line = StopLineDetector(stop_cfg)
+        self.offset = 0.0                               # 마지막 라인 오프셋 — 라인을 놓친 프레임의 정지선 판정에 씀
+        best_effort = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
+        self.pub = self.create_publisher(LineState, "/line/state", best_effort)
+        self.pub_stop = self.create_publisher(StopLineState, "/stop_line/state", best_effort)
         self.create_subscription(Image, p("camera_topic", "/camera/image_raw").value, self.on_image,
                                  qos_profile_sensor_data)
         self.create_subscription(String, "/line/tune", self.on_tune, 10)
@@ -58,6 +83,8 @@ class LineNode(Node):
         try:
             key, value = msg.data.split()
             self.detector.set_frames(key, int(float(value)))
+            if key == "CONFIRM":
+                self.stop_line.set_frames(int(float(value)))
         except ValueError as e:
             self.get_logger().warn(f"/line/tune 형식 오류 {msg.data!r}: {e}")
             return
@@ -71,7 +98,13 @@ class LineNode(Node):
         except ValueError as e:
             self.get_logger().warn(f"영상 변환 실패: {e}", throttle_duration_sec=10.0)
             return
-        r = self.detector.process(bgr)
+        c = self.detector.cfg
+        small = cv2.resize(bgr, (c.width, c.height), interpolation=cv2.INTER_AREA)   # 두 판정이 같은 축소 영상을 씀
+        r = self.detector.process(small)
+        if r.line_found:
+            self.offset = float(r.offset)
+        s = self.stop_line.process(small, self.offset)
+        self.pub_stop.publish(StopLineState(detected=s.detected, confirmed=s.confirmed, angle=float(s.angle)))
         self.pub.publish(LineState(offset=float(r.offset), line_found=r.line_found,
                                    event=r.event.value, raw_event=r.raw_event.value,
                                    angle=float(r.angle), angle_valid=r.angle_valid))

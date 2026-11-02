@@ -9,9 +9,9 @@
 | `agv_hw` | 드라이버(모터 DRV8835·서보 PCA9685·초음파·LED, 가짜 포함) + 노드 `motor_node` `pantilt_node` `ultrasonic_node` `led_node` | pytest 21 (모터 드라이버 4 포함) |
 | `agv_bt` | `RfcommServer`, `BridgeCore`(명령 판단), `VideoStreamer`, `SysMonitor` + 노드 `bt_bridge_node` | pytest 14 (RfcommServer 4 포함) |
 | `agv_interfaces` | 메시지 `LineState`·`StopLineState`·`MarkerState`, 액션 `Drive`(command → success·result, 피드백 linear·angular·offset) — Status·Command는 상태 머신 작업 때 | — |
-| `agv_vision` | `LineDetector`(검정 = 어둡고 색 없음, 줄마다 가는 구간만 라인 후보 + 가운데·직전 위치·아래 닿음 가중치, 라인 각도(직선 맞춤), 이어진 영역만으로 코너·라인 끝, 3프레임 확인) + 노드 `line_node`, `StopLineDetector`(세로 열 방식 정지선) + 노드 `stop_line_node`, `MarkerDetector`(2cm 색 스티커, 라인 기준 좌우) + 노드 `marker_node` | pytest 82 (합성 트랙 사진) |
+| `agv_vision` | `LineDetector`(검정 = 어둡고 색 없음, 줄마다 가는 구간만 라인 후보 + 가운데·직전 위치·아래 닿음 가중치, 라인 각도(직선 맞춤), 이어진 영역만으로 코너·라인 끝, 3프레임 확인), `StopLineDetector`(세로 열 방식 정지선) + 노드 `line_node`(둘을 같은 프레임으로), `MarkerDetector`(2cm 색 스티커, 라인 기준 좌우) + 노드 `marker_node` | pytest 82 (합성 트랙 사진) |
 | `agv_control` | `PidController`·`DriveController`(FOLLOW_TO_EVENT·STOP, 오프셋 + 라인 각도 보정(85~95° 허용), 목적지 색 스티커 쪽으로 회전 — 유턴·접근은 다음 단계) + 노드 `drive_node`(액션 `/drive`, `/drive/speed`) | pytest 28 |
-| `agv_bringup` | `launch/s0_hw.launch.py`, `launch/s1_line.launch.py`(S0 + line_node + stop_line_node + marker_node + drive_node), `config/params.yaml` | — |
+| `agv_bringup` | `launch/s0_hw.launch.py`, `launch/s1_line.launch.py`(S0 + line_node + marker_node + drive_node), `config/params.yaml` | — |
 
 ## 빌드 (Pi)
 ```bash
@@ -79,7 +79,7 @@ ros2 action send_goal /drive agv_interfaces/action/Drive "{command: FOLLOW_TO_EV
 - 곡선 뒤 직선에서 좌우로 계속 흔들리면 회전 세기 ↓, 라인 한쪽으로 치우쳐 가면 라인 기준 조정 (카메라가 왼쪽에 달려 −0.10)
 - `LINE_END`로 멈추면 정지한 채 3번(총 1.5초) 다시 보고, 라인이 보이면 자동으로 다시 출발한다 (앱 상태 "라인 재확인 2/3", params.yaml `recheck_*`, 끄려면 `recheck_tries: 0`)
 - 정지선·코너 판정이 나오면 **일단 멈추고** 멈춘 채 확인 프레임을 채운다 (앱 상태 "멈춰서 확인: STOP_LINE"). 판정이 사라지면 오판정으로 보고 다시 출발 (params.yaml `verify_*`)
-- 라인을 잠깐 놓쳤는데 멈추면 **라인 끝 프레임** ↑, 진짜 끝에서 늦게 서면 ↓. 오판정으로 잠깐씩 멈칫하면 `stop_line_node`의 `min_thickness`·`black_ratio` 조정, 확인 프레임은 멈춘 채 세므로 지나침과 무관
+- 라인을 잠깐 놓쳤는데 멈추면 **라인 끝 프레임** ↑, 진짜 끝에서 늦게 서면 ↓. 오판정으로 잠깐씩 멈칫하면 `line_node`의 `stop_min_thickness`·`black_ratio` 조정, 확인 프레임은 멈춘 채 세므로 지나침과 무관
 - 조정(params.yaml `drive_node`): 안 움직이면 `speed`·`min_speed` ↑, 지그재그면 `kp` ↓ 또는 `kd` ↑, 늦게 꺾으면 `kp` ↑, 비스듬히 선 채로 라인과 엇갈려 가면 `kh` ↑, 각도 때문에 흔들리면 `kh` ↓ 또는 `heading_deadband_deg` ↑
 - 개발자 탭 "라인 오프셋 · 이벤트"에 각도와 기울기 선이 나온다 (85~95° 밖이면 빨강)
 - 노트북 앱 수동 조종과 같이 쓰지 않는다 (둘 다 /cmd_vel을 보냄)

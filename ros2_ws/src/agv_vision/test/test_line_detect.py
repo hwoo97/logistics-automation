@@ -8,7 +8,7 @@ from agv_vision.line_detect import EventConfirmer, LineConfig, LineDetector
 W, H, LW = 320, 240, 20           # 라인 굵기 20px
 TOP = 160                          # 관심 영역 시작 행 → 먼 띠 160~185, 중간 186~212, 가까운 띠 213~239
 MID_Y = (192, 206)                 # 중간 띠 안의 가로 라인 (코너·갈래, 라인 테이프 굵기)
-STOP_Y = (188, 212)                # 정지선 모양 (판정은 stop_line_node, 여기서는 라인 판정에 지장 없는지만)
+STOP_Y = (188, 212)                # 정지선 모양 (판정은 StopLineDetector, 여기서는 라인 판정에 지장 없는지만)
 
 
 def floor():
@@ -264,7 +264,7 @@ def test_thick_object_does_not_inflate_line_width():
 
 
 def test_stop_line_shape_does_not_disturb_line():
-    """정지선 모양이 있어도 라인 판정은 그대로 — 정지선 판정은 stop_line_node가 함."""
+    """정지선 모양이 있어도 라인 판정은 그대로 — 정지선 판정은 StopLineDetector가 함."""
     img = floor()
     vline(img, 160)
     hline(img, 110, 210, STOP_Y)

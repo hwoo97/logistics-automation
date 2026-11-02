@@ -89,7 +89,7 @@ class DriveOutput:
 
 
 def merge_stop_line(line: LineInput, detected: bool, confirmed: bool) -> LineInput:
-    """line_node 결과에 stop_line_node 판정을 합침 — 정지선이 있으면 이벤트를 STOP_LINE으로."""
+    """/line/state에 /stop_line/state 판정을 합침 — 정지선이 있으면 이벤트를 STOP_LINE으로."""
     event = LineEvent.STOP_LINE if confirmed else line.event
     raw = LineEvent.STOP_LINE if detected or confirmed else line.raw_event
     return LineInput(line.offset, line.line_found, event, raw, line.angle, line.angle_valid)

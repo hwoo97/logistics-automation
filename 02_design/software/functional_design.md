@@ -13,7 +13,7 @@
 | F1 | 영상 획득 | Camera Module 3 Wide (IMX708, CSI) | `camera_ros` (기존 패키지) | S0 |
 | F2 | 카메라 각도 전환 | SG90 × 2 ← PCA9685 (I2C) | `pantilt_node` | S0, S6 |
 | F3 | 모터 구동 | TT 모터 4개 ← DRV8835 × 2 (GPIO 18~25) | `motor_node` | S0 |
-| F4 | 라인 추종·이벤트 검출 | 카메라 | `line_node` + `stop_line_node` + `drive_node` | S1~S3 |
+| F4 | 라인 추종·이벤트 검출 | 카메라 | `line_node` + `drive_node` | S1~S3 |
 | F5 | 직각 회전·유턴 | 모터 + 카메라 | `drive_node` | S2, S8 |
 | F6 | 색 마커 판별 | 카메라 | `marker_node` | S4, S5 |
 | F7 | 화물·표지판 인식 (AI) | 카메라 | `classifier_node` | S6, S7 |
@@ -31,8 +31,7 @@
 ```
  ┌──────────────────────── Raspberry Pi 5 (ROS 2 Jazzy) ────────────────────────┐
  │                                                                              │
- │  camera_ros ──/camera/image_raw──┬──► line_node ──/line/state──► drive_node  │
- │                                  ├──► stop_line_node ─/stop_line/state─► (drive_node) │
+ │  camera_ros ──/camera/image_raw──┬──► line_node ──/line/state, /stop_line/state──► drive_node  │
  │                                  ├──► marker_node ─/marker/state─► (drive_node)        │
  │                                  ├──► classifier_node (서비스)      │  │      │
  │                                  └──► bt_bridge_node (영상)     /cmd_vel│      │
@@ -51,7 +50,7 @@
 ```
 
 - `mission_node`가 전체 흐름(상태 머신)을 결정하고, `drive_node`는 "라인 따라가기·회전" 같은 주행 동작만 수행
-- 영상 처리: 주행 중 `line_node`·`stop_line_node`·`marker_node`가 프레임마다, `classifier_node`는 서비스 호출 시에만 처리
+- 영상 처리: 주행 중 `line_node`(라인·정지선)·`marker_node`가 프레임마다, `classifier_node`는 서비스 호출 시에만 처리
 
 ---
 
@@ -63,7 +62,7 @@
 |--------|------|------|
 | `agv_interfaces` | ament_cmake | 사용자 정의 메시지·서비스 (`.msg`, `.srv`) — 인터페이스 패키지는 CMake 필수 |
 | `agv_hw` | ament_python | `motor_node`, `pantilt_node`, `ultrasonic_node`, `led_node` (lgpio, smbus2) |
-| `agv_vision` | ament_python | `line_node`, `stop_line_node`, `marker_node`, `classifier_node` (OpenCV, LiteRT) |
+| `agv_vision` | ament_python | `line_node`, `marker_node`, `classifier_node` (OpenCV, LiteRT) |
 | `agv_control` | ament_python | `drive_node`, `mission_node` |
 | `agv_bt` | ament_python | `bt_bridge_node` (Python socket RFCOMM) |
 | `agv_protocol` | ament_python | 블루투스 메시지 만들기·해석 (순수 Python, 노트북 앱도 같은 코드 사용) |
@@ -77,8 +76,8 @@
 | 이름 | 타입 | 발행 → 구독 | 주기 | 내용 |
 |------|------|-------------|------|------|
 | `/camera/image_raw` | sensor_msgs/Image | camera_ros → vision, bt | 15~30Hz | 카메라 영상 |
-| `/line/state` | agv_interfaces/LineState | line_node → drive_node, stop_line_node | 영상 주기 | 라인 오프셋, 이벤트 |
-| `/stop_line/state` | agv_interfaces/StopLineState | stop_line_node → drive_node, bt_bridge | 영상 주기 | 정지선 판정·확정·기울기 |
+| `/line/state` | agv_interfaces/LineState | line_node → drive_node, marker_node, bt_bridge | 영상 주기 | 라인 오프셋, 이벤트 |
+| `/stop_line/state` | agv_interfaces/StopLineState | line_node → drive_node, bt_bridge | 영상 주기 | 정지선 판정·확정·기울기 |
 | `/marker/state` | agv_interfaces/MarkerState | marker_node → drive_node, bt_bridge | 영상 주기 | 보이는 색 스티커의 색·좌우(라인 기준)·화면 높이 |
 | `/cmd_vel` | geometry_msgs/Twist | drive_node·mission(수동) → motor_node | 20Hz | 선속도 x, 각속도 z |
 | `/ultrasonic/range` | sensor_msgs/Range | ultrasonic_node → mission_node | 15Hz | 거리(m), 필터 적용 |
@@ -92,7 +91,7 @@
 | `/drive/speed` | std_msgs/Float32 | bt_bridge → drive_node | 이벤트 | 개발자 탭 "주행 속도": 라인 주행 기본 선속도 (0.2~1.0), 주행 중에도 적용 |
 | `/drive/tune` | std_msgs/String | bt_bridge → drive_node | 이벤트 | 개발자 탭 "회전 세기"(`TURN 0.6`)·"라인 기준"(`CENTER -0.1`)·"회전 전 전진"(`FORWARD 0.6`)·"제자리 회전"(`SPIN 0.6`), 주행 중에도 적용 |
 | `/drive/target` | std_msgs/String | bt_bridge(시험)·mission_node(예정) → drive_node | 이벤트 | 목적지 색 `red`/`green`/`blue`/`yellow`, `NONE`이면 마커를 보지 않음 |
-| `/line/tune` | std_msgs/String | bt_bridge → line_node, stop_line_node | 이벤트 | 개발자 탭 "확인 프레임"(`CONFIRM 3`)·"라인 끝 프레임"(`LINE_END 10`), 실행 중 적용 |
+| `/line/tune` | std_msgs/String | bt_bridge → line_node | 이벤트 | 개발자 탭 "확인 프레임"(`CONFIRM 3`)·"라인 끝 프레임"(`LINE_END 10`), 실행 중 적용 |
 | `/dev/pantilt_angle` | std_msgs/Float32MultiArray | bt_bridge → pantilt_node | 이벤트 | 개발자 탭: [팬, 틸트] 각도 |
 
 ### 서비스 / 액션
@@ -254,18 +253,18 @@ FOLLOW_TO_EVENT ─► 이벤트?
 - 바퀴 위치·방향 보정표(`params.yaml`): L1~L4 → 좌전·좌후·우전·우후, 극성 반전 여부 (S0에서 확정)
 - 안전: `/cmd_vel` 0.5초 이상 끊기면 정지(워치독), `/safety/estop` true면 래치 정지
 
-### F4 · 라인 추종 (`line_node` + `stop_line_node` + `drive_node`)
+### F4 · 라인 추종 (`line_node` + `drive_node`)
 - 처리: 영상 320×240으로 축소 → 하단 1/3 관심 영역 → 검정 추출(HSV: 줄의 바닥 밝기(상위 10%) × 0.72 이하 + 채도 낮음, 색 마커 제외 — 2026-11-02 광택 테이프 반사로 고정 문턱이 라인을 잃어 변경) → 연결 성분
 - 라인 고르기 (2026-10-30, 주변 어두운 물체 대책): 줄마다 **폭 ≤ max_line_px(45px)인 가는 구간만** 라인 후보 — 두꺼운 물체는 붙어 있든 떨어져 있든 제외. 덩어리 점수 = 가는 구간 면적 × 가운데 가중치(양끝 0.3) × 직전 위치 가중치 × 화면 맨 아래에 닿으면 1.5배. 이벤트 판정은 **고른 라인과 이어진 영역만** 사용 — 가중치를 이벤트에 쓰면 화면 끝까지 뻗는 코너 라인을 놓치므로
 - 오프셋: 고른 라인의 가까운 띠(관심 영역 아래 1/3)에서 아래 줄부터 위로, 줄마다 바로 아래 줄 위치에 가까운 가는 구간 중심의 평균 → -1.0 ~ 1.0. 라인을 못 찾으면 마지막 값 유지 + LINE_END
 - 이벤트 검출 (위쪽 행 기준)
   | 이벤트 | 판단 |
   |---|---|
-  | STOP_LINE | **`stop_line_node`가 따로 판정** — `/stop_line/state`(아래 "정지선") |
+  | STOP_LINE | **`StopLineDetector`가 따로 판정** (같은 `line_node`) — `/stop_line/state`(아래 "정지선") |
   | ~~JUNCTION_T / LEFT / RIGHT~~ | **판정 안 함 — 분기점은 색 마커 인식이 맡음 (2026-10-30 결정)**. T자·옆 갈래 모양은 NONE, 마커를 놓쳐 T자에서 라인이 끊기면 LINE_END로 정지 |
   | CORNER_LEFT / RIGHT | 앞쪽 라인 없음 + 한쪽으로만 가로 라인 (폭이 라인 폭의 2배 이상 — 곧은 라인이 화면 끝에 있는 경우 제외) |
   | LINE_END | 관심 영역에 라인 없음 — 가까운 띠에서만 놓치고 직전 위치 근처 위쪽(중간·먼 띠)에 라인이 보이면 "잠깐 놓침"(NONE, 감속, 라인 끝 프레임의 2배까지), **10프레임 연속**이어야 확정 (2026-10-30: 3프레임이면 흔들림으로 잠깐 놓쳐도 멈춤) |
-- **정지선 (`stop_line_node`, 2026-11-02 분리·세로 열 방식):** 가로 줄 방식은 기운 정지선을 놓침(실제 사진 +5° 대부분, ±15° 전부). 같은 검정 추출을 쓰고, 라인과 이어진 덩어리에서 **열마다** 가장 긴 세로 구간을 본다
+- **정지선 (`StopLineDetector`, 2026-11-02 세로 열 방식, 노드는 CPU를 줄이려고 `line_node`에 합침):** 가로 줄 방식은 기운 정지선을 놓침(실제 사진 +5° 대부분, ±15° 전부). 같은 검정 추출을 쓰고, 라인과 이어진 덩어리에서 **열마다** 가장 긴 세로 구간을 본다
   - 관심 영역은 라인(하단 1/3)보다 넓은 **하단 1/2** — 일찍 잡아야 지연·관성으로 지나쳐도 영역 안에서 멈춤
   - 관심 영역 위·아래에 닿는 열 묶음 = 라인 (정지선이 가까운 띠에 들어오면 라인 오프셋이 끌려가므로 위치는 이것으로 판단, 오프셋은 덩어리 고르는 데만 사용)
   - 정지선 열 = 위·아래에 닿지 않고 두께 ≥ 라인 폭 × 0.65 (위에 닿으면 아직 들어오는 중, 아래에 닿으면 곡선의 대각선 라인일 수 있음). 단 판정 후 20프레임 동안은 아래로 나가는 구간(두께 ≤ 라인 폭 × 2.5)도 인정 — 지나쳐 멈춘 뒤 판정이 사라져 재출발하는 것 방지. 3열까지 끊겨도 이어진 것으로 봄(테이프 반사)

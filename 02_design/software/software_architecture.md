@@ -62,7 +62,7 @@ logistics-automation/
 │  ├─ agv_vision/                   # 영상 알고리즘 + 노드
 │  │  └─ agv_vision/
 │  │     ├─ line_detect.py  stop_line.py  marker_detector.py  classifier.py
-│  │     ├─ line_node.py  stop_line_node.py  marker_node.py  classifier_node.py
+│  │     ├─ line_node.py  marker_node.py  classifier_node.py
 │  │
 │  ├─ agv_control/                  # 주행·상태 머신
 │  │  └─ agv_control/
@@ -116,8 +116,7 @@ logistics-automation/
 | `stop_line.py` | `StopLineDetector.process(bgr, offset) -> StopLineResult` | 영상·오프셋 → 정지선 판정(세로 열 방식)·확정·기울기 |
 | `marker.py` | `MarkerDetector.process(bgr, offset, angle) -> list[Marker]` | 영상 + 라인 위치 → 색 스티커의 색·좌우(라인 기준)·화면 높이 |
 | `classifier.py` | `TfliteClassifier.predict(bgr) -> (label, score)`, `decide(results)` | LiteRT 추론, 5프레임 판정 규칙 |
-| `line_node.py` | `LineNode` | 영상 구독(최신 1장) → `/line/state` 발행 |
-| `stop_line_node.py` | `StopLineNode` | 영상 + `/line/state` 오프셋 → `/stop_line/state` 발행 |
+| `line_node.py` | `LineNode` | 영상 구독(최신 1장) → 라인·정지선 판정, `/line/state`·`/stop_line/state` 발행 |
 | `marker_node.py` | `MarkerNode` | 프레임마다 판별, `/marker/state` 발행 |
 | `classifier_node.py` | `ClassifierNode` | `/vision/classify` 요청 시 모델(CARGO/SIGN) 선택 → 판정 |
 
@@ -184,7 +183,6 @@ logistics-automation/
 motor_node:      { ros__parameters: { duty_max: 0.75, pwm_hz: 1000, wheel_map: [...], invert: [...], use_fake_hw: false } }
 pantilt_node:    { ros__parameters: { pan_channel: 0, tilt_channel: 1, poses: { LINE: [70, 130], JUNCTION: [65, 165], SIGN: [65, 180] } } }
 line_node:       { ros__parameters: { roi_ratio: 0.33, confirm_frames: 3 } }
-stop_line_node:  { ros__parameters: { width_ratio: [3.0, 12.0], min_thickness: 0.65, confirm_frames: 3 } }
 marker_node:     { ros__parameters: { red: [168, 10, 125, 125], yellow: [...], green: [...], blue: [...], min_area: 30 } }
 classifier_node: { ros__parameters: { cargo_model: models/cargo.tflite, sign_model: models/sign.tflite, min_score: 0.8 } }
 ultrasonic_node: { ros__parameters: { rate_hz: 15, median_window: 5 } }
@@ -247,7 +245,7 @@ bt_bridge_node:  { ros__parameters: { heartbeat_timeout_s: 1.5, video_fps: 5, vi
 |:---:|------|:---:|
 | 1 | `agv_interfaces`, `agv_protocol`, `agv_bringup` 골격 | 빌드 |
 | 2 | 드라이버 4종(실제·가짜) + hw 노드 4개, camera_ros 설정 | S0 |
-| 3 | `LineDetector` + `line_node`, `StopLineDetector` + `stop_line_node`, `PidController` + `DriveController` + `drive_node` | S1~S3, S8 |
+| 3 | `LineDetector`·`StopLineDetector` + `line_node`, `PidController` + `DriveController` + `drive_node` | S1~S3, S8 |
 | 4 | `MarkerDetector` + `marker_node`, `DriveController` 마커 확인·회전 | S4, S5 |
 | 5 | 노트북 앱 + `agv_bt` (제어 채널 먼저, 영상 나중) | S0 |
 | 6 | `TfliteClassifier` + `classifier_node` (데이터 수집 → 학습) | S6, S7 |

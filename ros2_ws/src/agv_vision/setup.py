@@ -18,7 +18,6 @@ setup(
     entry_points={
         "console_scripts": [
             "line_node = agv_vision.line_node:main",
-            "stop_line_node = agv_vision.stop_line_node:main",
             "marker_node = agv_vision.marker_node:main",
         ],
     },

@@ -62,21 +62,13 @@ line_node:
     bottom_bonus: 1.5           # 화면 맨 아래(차량 바로 앞)에 닿는 덩어리 가산
     confirm_frames: 3           # S1~S3에서 사진·주행으로 보정
     line_end_frames: 10         # 라인 끝만 더 오래 확인 (잠깐 놓친 것을 끝으로 보지 않게) — 진짜 끝에서 너무 늦게 서면 낮춤
-
-stop_line_node:
-  ros__parameters:
-    roi_ratio: 0.5              # 아래 1/2 (y120~) — 라인보다 넓게, 일찍 잡아 지나쳐 멈춰도 영역 안
-    black_ratio: 0.72           # line_node와 같게
-    black_v_max: 170
-    black_s_max: 90
-    black_blur: 5
-    max_line_px: 45
-    width_ratio: [3.0, 12.0]    # 정지선 가로 폭 = 라인 굵기의 3~12배 (트랙 규격 4~5배)
-    min_thickness: 0.65         # 세로 두께 ≥ 라인 굵기 × 0.65 — 같은 테이프 실측 0.76~0.79배, 얇은 바닥 선 제외
-    max_tilt_deg: 35.0          # 이보다 기울면 정지선 아님
-    gap_cols: 3                 # 테이프 반사로 이만큼 끊겨도 이어진 것으로 봄
-    confirm_frames: 3           # 노트북 앱 "확인 프레임"으로 조정
-    hold_frames: 20             # 판정 후 이 프레임 동안 아래로 나가는 정지선도 인정
+    # 정지선 판정 (같은 노드, 검정 추출·확인 프레임은 위 값을 함께 씀)
+    stop_roi_ratio: 0.5         # 아래 1/2 (y120~) — 라인보다 넓게, 일찍 잡아 지나쳐 멈춰도 영역 안
+    stop_width_ratio: [3.0, 12.0]   # 정지선 가로 폭 = 라인 굵기의 3~12배 (트랙 규격 4~5배)
+    stop_min_thickness: 0.65    # 세로 두께 ≥ 라인 굵기 × 0.65 — 같은 테이프 실측 0.76~0.79배, 얇은 바닥 선 제외
+    stop_max_tilt_deg: 35.0     # 이보다 기울면 정지선 아님
+    stop_gap_cols: 3            # 테이프 반사로 이만큼 끊겨도 이어진 것으로 봄
+    stop_hold_frames: 20        # 판정 후 이 프레임 동안 아래로 나가는 정지선도 인정
 
 marker_node:
   ros__parameters:
