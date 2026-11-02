@@ -31,7 +31,8 @@ class BtBridgeNode(Node):
         fps = p("video_fps", 5.0).value
         size = p("video_size", [320, 240]).value
         quality = p("jpeg_quality", 50).value
-        camera_topic = p("camera_topic", "/camera/image_raw").value
+        self.camera_topic = p("camera_topic", "/camera/image_raw").value
+        self._image_sub = None                                # 앱이 영상을 받을 때만 카메라 구독
 
         self.lock = threading.Lock()                          # 서버 스레드·ROS 콜백이 core를 함께 씀
         self.core = BridgeCore(self, standalone=standalone)
@@ -54,7 +55,6 @@ class BtBridgeNode(Node):
         self.pub_line_tune = self.create_publisher(String, "/line/tune", q10)
         self.pub_target = self.create_publisher(String, "/drive/target", q10)
         self.create_subscription(Range, "/ultrasonic/range", self.on_range, qos_profile_sensor_data)
-        self.create_subscription(Image, camera_topic, self.on_image, qos_profile_sensor_data)
         try:                                                  # agv_interfaces가 없으면 LINE만 빠짐
             from agv_interfaces.msg import LineState, MarkerState, StopLineState
             best_effort = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -237,8 +237,15 @@ class BtBridgeNode(Node):
         self.streamer.update(msg.encoding, msg.height, msg.width, msg.step, msg.data)
 
     def on_video_timer(self):
-        if self.server._video is None:
+        if not self.server.video_connected:                   # 앱이 영상을 안 받으면 영상 복사·JPEG 모두 멈춤
+            if self._image_sub is not None:
+                self.destroy_subscription(self._image_sub)
+                self._image_sub = None
+                self.streamer.clear()
             return
+        if self._image_sub is None:
+            self._image_sub = self.create_subscription(Image, self.camera_topic, self.on_image,
+                                                       qos_profile_sensor_data)
         try:
             jpeg = self.streamer.next_frame(time.monotonic())
         except ValueError as e:

@@ -168,6 +168,21 @@ class RfcommServer:
                 old, self._video = self._video, conn
                 if old:
                     old.close()
+                threading.Thread(target=self._watch_video, args=(conn,), daemon=True).start()
+
+    def _watch_video(self, conn: socket.socket) -> None:
+        """영상 채널은 받을 것이 없음 — 앱이 끊으면 바로 알아채서 영상 처리를 멈추게 한다."""
+        try:
+            while conn.recv(64):
+                pass
+        except OSError:
+            pass
+        if self._video is conn:
+            self._video = None
+
+    @property
+    def video_connected(self) -> bool:
+        return self._video is not None
 
     def send_frame(self, jpeg: bytes) -> bool:
         """최신 프레임 1장만 보관 — 이전 전송이 안 끝났으면 덮어써서 밀린 프레임을 버린다."""

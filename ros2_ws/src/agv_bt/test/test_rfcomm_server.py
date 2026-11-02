@@ -82,3 +82,29 @@ def test_video_latest_frame(server):
         got += reader.feed(v.recv(4096))
     assert got[0] == b"\xff\xd8frame1\xff\xd9"
     v.close()
+
+
+def test_video_client_close_is_noticed_without_sending(server):
+    """앱이 영상을 끄면 프레임을 보내지 않아도 바로 알아챔 → 브리지가 카메라 구독을 끊음."""
+    srv, _, _ = server
+    assert not srv.video_connected
+    v = connect(PORT + 1)
+    assert wait_for(lambda: srv.video_connected)
+    v.close()
+    assert wait_for(lambda: not srv.video_connected)
+    v2 = connect(PORT + 1)                                  # 다시 켜면 다시 연결됨
+    assert wait_for(lambda: srv.video_connected)
+    v2.close()
+
+
+def test_replaced_video_client_stays_connected(server):
+    srv, _, _ = server
+    a = connect(PORT + 1)
+    assert wait_for(lambda: srv.video_connected)
+    old = srv._video
+    b = connect(PORT + 1)
+    assert wait_for(lambda: srv._video is not old)
+    a.close()
+    time.sleep(0.1)
+    assert srv.video_connected                              # 이전 연결이 끊겨도 새 연결은 유지
+    b.close()

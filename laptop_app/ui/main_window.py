@@ -47,6 +47,7 @@ class MainWindow:
                                on_closed=lambda r: self.q.put(("closed", r)))
         self.video = VideoReceiver()
         self.connecting = False
+        self.video_busy = False             # 영상 채널 연결 시도 중
         self.last_state = None
 
         root.title("물류 AGV 제어")
@@ -86,6 +87,8 @@ class MainWindow:
         self.conn_btn.pack(side="left", padx=4)
         self.conn_lbl = ttk.Label(bar, text="연결 안 됨", foreground="gray", width=26)
         self.conn_lbl.pack(side="left", padx=6)
+        self.video_on = tk.BooleanVar(value=self.cfg.get("video_on", True))
+        ttk.Checkbutton(bar, text="영상 받기", variable=self.video_on, command=self._toggle_video).pack(side="left", padx=4)
         self.flip_v = tk.BooleanVar(value=self.cfg.get("video_flip_v", False))
         self.flip_h = tk.BooleanVar(value=self.cfg.get("video_flip_h", False))
         ttk.Checkbutton(bar, text="영상 상하 반전", variable=self.flip_v, command=self._apply_flip).pack(side="left", padx=4)
@@ -108,6 +111,30 @@ class MainWindow:
         if (self.cfg.get("video_flip_v"), self.cfg.get("video_flip_h")) != (v, h):
             self.cfg["video_flip_v"], self.cfg["video_flip_h"] = v, h
             save_config(self.cfg)
+
+    def _toggle_video(self):
+        """시험 때 영상을 끄면 영상 채널을 끊음 → Pi가 카메라 구독·JPEG 만들기를 멈춘다. 다음 실행을 위해 저장."""
+        self.cfg["video_on"] = self.video_on.get()
+        save_config(self.cfg)
+        self._sync_video()
+        self.dev.log("SYS", "영상 받기 켬" if self.video_on.get() else "영상 받기 끔")
+
+    def _sync_video(self):
+        """영상 채널을 "연결됨 + 영상 받기" 상태에 맞춘다."""
+        if not (self.client.connected and self.video_on.get()):
+            self.video.close()
+            self.user.video.clear()
+            self.dev.video.clear()
+        elif not self.video.connected and not self.video_busy:
+            self.video_busy = True
+            threading.Thread(target=self._video_worker, args=(self._target(),), daemon=True).start()
+
+    def _video_worker(self, target):
+        try:
+            self.video.connect(target)
+            self.q.put(("video_result", None))
+        except OSError as e:
+            self.q.put(("video_result", str(e)))
 
     def _target(self) -> dict:
         if self.transport.current() == 1:
@@ -144,12 +171,7 @@ class MainWindow:
         except OSError as e:
             self.q.put(("connect_failed", str(e)))
             return
-        try:
-            self.video.connect(target)
-            video_err = None
-        except OSError as e:
-            video_err = str(e)
-        self.q.put(("connected", video_err))
+        self.q.put(("connected",))
 
     # ── 전송 ─────────────────────────────────────────────
 
@@ -220,10 +242,16 @@ class MainWindow:
             self.connecting = False
             self.conn_btn.config(state="normal", text="해제")
             self.conn_lbl.config(text="연결됨", foreground="#2e7d32")
-            self.dev.log("SYS", "연결됨" + (f" (영상 채널 실패: {item[1]})" if item[1] else ""))
+            self.dev.log("SYS", "연결됨")
             self.user.add_event("연결됨")
             self.dev.resend_watches()
             self.dev.send_tuning()
+            self._sync_video()
+        elif kind == "video_result":
+            self.video_busy = False
+            if item[1]:
+                self.dev.log("ERR", f"영상 채널 실패: {item[1]}")
+            self._sync_video()                         # 연결 중에 끄거나 끊긴 경우 맞춤
         elif kind == "connect_failed":
             self.connecting = False
             self._lock_inputs(False)

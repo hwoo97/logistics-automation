@@ -29,5 +29,10 @@ class VideoView(tk.Canvas):
         self._photo = ImageTk.PhotoImage(img)      # 참조를 잡아 두지 않으면 사라짐
         self.itemconfigure(self._image_id, image=self._photo)
 
+    def clear(self) -> None:
+        """마지막 프레임을 지움 — 영상을 끈 뒤 멈춘 화면을 실시간으로 착각하지 않게."""
+        self._photo = None
+        self.itemconfigure(self._image_id, image="")
+
     def set_overlay(self, text: str) -> None:
         self.itemconfigure(self._text_id, text=text)

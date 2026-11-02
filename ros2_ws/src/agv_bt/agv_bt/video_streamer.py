@@ -33,6 +33,9 @@ class VideoStreamer:
     def update(self, encoding, height, width, step, data) -> None:
         self._latest = (encoding, height, width, step, data)
 
+    def clear(self) -> None:
+        self._latest = None
+
     def next_frame(self, now: float) -> bytes | None:
         """보낼 차례이고 새 프레임이 있으면 JPEG, 아니면 None."""
         if self._latest is None or now < self._next:
