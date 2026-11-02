@@ -7,4 +7,4 @@ string result           # 끝난 이유: STOP_LINE / CORNER_LEFT / CORNER_RIGHT 
 float32 linear          # 현재 /cmd_vel 선속도
 float32 angular         # 현재 /cmd_vel 회전
 float32 offset          # 현재 라인 오프셋
-string  phase           # FOLLOW / RECHECK 2/3 (라인 끝 후 정지해서 다시 보는 중)
+string  phase           # FOLLOW / RECHECK 2/3 (라인 끝 후 정지해서 다시 보는 중) / VERIFY STOP_LINE (판정 후 정지해서 확인 중)

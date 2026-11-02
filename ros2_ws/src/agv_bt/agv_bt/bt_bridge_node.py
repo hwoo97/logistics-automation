@@ -134,13 +134,13 @@ class BtBridgeNode(Node):
         future.add_done_callback(self._on_drive_accepted)
 
     def _on_drive_feedback(self, msg):
-        """단계가 바뀔 때만 앱에 알림 — 라인 끝 재확인 중(RECHECK 2/3) 또는 다시 출발(RUNNING)."""
+        """단계가 바뀔 때만 앱에 알림 — 라인 끝 재확인(RECHECK 2/3), 정지선·코너 확인(VERIFY STOP_LINE), 다시 출발(RUNNING)."""
         phase = msg.feedback.phase
         if phase == self._drive_phase:
             return
         self._drive_phase = phase
-        if phase.startswith("RECHECK"):
-            self.send(format_dev("DRIVE", "RECHECK", phase.split()[-1]))
+        if phase.startswith(("RECHECK", "VERIFY")):             # "RECHECK 2/3", "VERIFY STOP_LINE"
+            self.send(format_dev("DRIVE", *phase.split()))
         else:
             self.send(format_dev("DRIVE", "RUNNING"))
 

@@ -84,6 +84,9 @@ drive_node:
     recheck_tries: 3            # LINE_END 후 정지해서 라인을 다시 보는 횟수 (0이면 바로 끝)
     recheck_s: 0.5              # 한 번 보는 시간
     recheck_frames: 3           # 이만큼 연속 보이면 자동으로 다시 출발
+    verify_clear_frames: 3      # 정지선·코너 판정 후 멈춰서 확인 — 판정이 이만큼 연속 사라지면 다시 출발
+    verify_timeout_s: 2.0       # 확정도 사라짐도 없으면 이 시간 뒤 다시 출발
+    verify_cooldown_s: 0.5      # 다시 출발 후 이 시간은 판정으로 멈추지 않음
 
 bt_bridge_node:
   ros__parameters:

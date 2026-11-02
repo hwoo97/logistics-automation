@@ -339,6 +339,7 @@ class DevTab(ttk.Frame):
             self.sys_lbl.config(text=f"온도 {r['temp']:.1f}℃ / CPU {r['cpu']:.0f}% / 메모리 {r['mem']:.0f}%")
         elif kind == "DRIVE":
             text, color = {"RUNNING": ("주행 중", "#2e7d32"), "RECHECK": (f"라인 재확인 {r['result']}", "#f57c00"),
+                           "VERIFY": (f"멈춰서 확인: {r['result']}", "#f57c00"),
                            "DONE": (f"끝: {r['result']}", "black"),
                            "REJECTED": (f"거부: {r['result']}", "#d32f2f")}.get(r["state"], (r["state"], "black"))
             self.drive_lbl.config(text=text, foreground=color)

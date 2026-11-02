@@ -251,7 +251,7 @@ def parse_reply(line: str) -> dict:
             if kind == "SYS":
                 return {"type": "DEV", "kind": kind, "temp": float(rest[1]),
                         "cpu": float(rest[2]), "mem": float(rest[3])}
-            if kind == "DRIVE":                 # DEV DRIVE <RUNNING|RECHECK|DONE|REJECTED> [<결과·이유·2/3>]
+            if kind == "DRIVE":                 # DEV DRIVE <RUNNING|RECHECK|VERIFY|DONE|REJECTED> [<결과·이유·2/3·이벤트>]
                 return {"type": "DEV", "kind": kind, "state": rest[1], "result": " ".join(rest[2:])}
             if kind == "NODES":
                 return {"type": "DEV", "kind": kind, "nodes": rest[1].split(",") if len(rest) > 1 else []}

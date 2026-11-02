@@ -14,6 +14,8 @@ from agv_protocol.types import DriveCommand, LineEvent
 
 # FOLLOW에서 멈추는 이벤트. 분기점은 색 마커 인식이 판단 (2026-10-30 결정) — 라인 검출은 JUNCTION을 내지 않음
 STOP_EVENTS = {LineEvent.STOP_LINE, LineEvent.CORNER_LEFT, LineEvent.CORNER_RIGHT, LineEvent.LINE_END}
+# 판정이 보이면 먼저 멈추고 확인하는 이벤트 — 달리면서 프레임을 채우면 지나쳐 버림 (2026-11-02 S1)
+VERIFY_EVENTS = {LineEvent.STOP_LINE, LineEvent.CORNER_LEFT, LineEvent.CORNER_RIGHT}
 
 
 @dataclass
@@ -34,6 +36,9 @@ class DriveConfig:
     recheck_tries: int = 3          # LINE_END 후 정지한 채 라인을 다시 보는 횟수 (0이면 바로 끝)
     recheck_s: float = 0.5          # 한 번 보는 시간
     recheck_frames: int = 3         # 라인이 이만큼 연속 보이면 자동으로 다시 출발
+    verify_clear_frames: int = 3    # 멈춰서 확인 중 판정이 이만큼 연속 사라지면 오판정 → 다시 출발
+    verify_timeout_s: float = 2.0   # 확정도 사라짐도 없이 이 시간이 지나면 다시 출발 (판정이 깜빡이는 경우)
+    verify_cooldown_s: float = 0.5  # 오판정으로 다시 출발한 뒤 이 시간은 판정으로 멈추지 않음 (같은 자리 반복 방지)
 
 
 @dataclass
@@ -93,6 +98,10 @@ class DriveController:
         self.last = DriveOutput(0.0, 0.0)   # 새 라인 상태가 없는 주기에는 직전 출력 유지
         self.recheck_t = None               # LINE_END 재확인 경과 시간 (None = 재확인 중 아님)
         self.recheck_seen = 0               # 재확인 중 라인이 연속으로 보인 프레임 수
+        self.verify_t = None                # 판정 후 멈춰서 확인한 시간 (None = 확인 중 아님)
+        self.verify_clear = 0               # 확인 중 판정이 연속으로 없던 프레임 수
+        self.verify_event = LineEvent.NONE
+        self.cooldown = 0.0                 # 남은 재정지 금지 시간
         self._floor = (self.cfg.min_speed, self.cfg.event_speed)   # set_speed가 낮췄다 올릴 때 되돌릴 값
 
     @property
@@ -102,6 +111,8 @@ class DriveController:
     @property
     def phase(self) -> str:
         """지금 단계 — 앱 표시용. "FOLLOW" 또는 "RECHECK 2/3"."""
+        if self.verify_t is not None:
+            return f"VERIFY {self.verify_event.value}"
         if self.recheck_t is None:
             return "FOLLOW"
         c = self.cfg
@@ -127,11 +138,12 @@ class DriveController:
         self.pid.reset()
         self.since_line = 0.0
         self.last = DriveOutput(0.0, 0.0)
-        self.recheck_t = None
+        self.recheck_t = self.verify_t = None
+        self.cooldown = 0.0
 
     def cancel(self) -> DriveOutput:
         self.command = None
-        self.recheck_t = None
+        self.recheck_t = self.verify_t = None
         return DriveOutput(0.0, 0.0, True, "STOPPED")
 
     def step(self, line: LineInput | None, dt: float) -> DriveOutput:
@@ -147,10 +159,13 @@ class DriveController:
         self.since_line = 0.0 if line is not None else self.since_line + dt
         if self.since_line > self.cfg.line_timeout_s:
             self.command = None
-            self.recheck_t = None
+            self.recheck_t = self.verify_t = None
             return DriveOutput(0.0, 0.0, True, "E_LINE")
         if self.recheck_t is not None:
             return self._step_recheck(line, dt)
+        if self.verify_t is not None:
+            return self._step_verify(line, dt)
+        self.cooldown = max(0.0, self.cooldown - dt)
         if line is None:                       # 이번 주기엔 새 영상 없음 → 직전 출력 유지
             return self.last
         if line.event == LineEvent.LINE_END and self.cfg.recheck_tries > 0:
@@ -160,6 +175,10 @@ class DriveController:
         if line.event in STOP_EVENTS:
             self.command = None
             return DriveOutput(0.0, 0.0, True, line.event.value)
+        if line.raw_event in VERIFY_EVENTS and self.cooldown <= 0.0:
+            self.verify_t, self.verify_clear, self.verify_event = 0.0, 0, line.raw_event   # 일단 멈추고 확인
+            self.last = DriveOutput(0.0, 0.0)
+            return self.last
 
         c = self.cfg
         err = line.offset - c.center_offset                 # 라인이 기준 위치보다 오른쪽이면 +
@@ -185,4 +204,20 @@ class DriveController:
             self.recheck_t = None
             self.command = None
             return DriveOutput(0.0, 0.0, True, LineEvent.LINE_END.value)
+        return self.last
+
+    def _step_verify(self, line: LineInput | None, dt: float) -> DriveOutput:
+        """정지선·코너 판정 후 멈춘 채 확인 — 확정되면 끝, 판정이 사라지면(또는 시간 초과) 오판정으로 보고 다시 출발."""
+        c = self.cfg
+        self.verify_t += dt
+        if line is not None:
+            if line.event in VERIFY_EVENTS:
+                self.verify_t = None
+                self.command = None
+                return DriveOutput(0.0, 0.0, True, line.event.value)
+            self.verify_clear = 0 if line.raw_event in VERIFY_EVENTS else self.verify_clear + 1
+        if self.verify_clear >= c.verify_clear_frames or self.verify_t >= c.verify_timeout_s:
+            self.verify_t = None
+            self.cooldown = c.verify_cooldown_s
+            self.pid.reset()
         return self.last

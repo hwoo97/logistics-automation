@@ -49,8 +49,8 @@ def test_angular_is_limited():
     assert abs(out.angular) <= DriveConfig().max_angular
 
 
-def test_slows_when_event_appears():
-    out = follow().step(LineInput(0.0, True, LineEvent.NONE, LineEvent.STOP_LINE), DT)
+def test_slows_when_line_lost_for_a_moment():
+    out = follow().step(LineInput(0.0, False), DT)
     assert out.linear == pytest.approx(DriveConfig().event_speed)
 
 
@@ -116,6 +116,79 @@ def test_cancel_during_recheck():
     d = follow()
     d.step(LOST, DT)
     assert d.cancel().result == "STOPPED" and not d.active and d.phase == "FOLLOW"
+
+
+RAW_STOP = LineInput(0.0, True, LineEvent.NONE, LineEvent.STOP_LINE)
+CONFIRMED_STOP = LineInput(0.0, True, LineEvent.STOP_LINE, LineEvent.STOP_LINE)
+CLEAR = LineInput(0.0, True)
+
+
+def test_halts_on_first_raw_stop_line():
+    """판정 첫 프레임에 바로 정지 — 달리면서 확인 프레임을 채우면 지나침 (2026-11-02 S1)."""
+    d = follow()
+    assert d.step(CLEAR, DT).linear > 0
+    out = d.step(RAW_STOP, DT)
+    assert (out.linear, out.angular) == (0, 0) and not out.done and d.phase == "VERIFY STOP_LINE"
+
+
+def test_verified_stop_line_finishes_while_stopped():
+    d = follow()
+    d.step(RAW_STOP, DT)
+    assert d.step(RAW_STOP, DT).linear == 0 and d.step(None, DT).linear == 0
+    out = d.step(CONFIRMED_STOP, DT)
+    assert out.done and out.result == "STOP_LINE" and not d.active
+
+
+def test_false_stop_line_resumes():
+    """판정이 사라지면 오판정 — 다시 출발, 잠시 같은 판정으로 안 멈춤."""
+    d = follow()
+    d.step(RAW_STOP, DT)
+    for _ in range(3):
+        assert d.step(CLEAR, DT).linear == 0
+    assert d.phase == "FOLLOW" and d.active
+    assert d.step(CLEAR, DT).linear > 0
+    assert d.step(RAW_STOP, DT).linear > 0                   # 재정지 금지 시간
+    for _ in range(11):
+        d.step(CLEAR, DT)
+    assert d.step(RAW_STOP, DT).linear == 0                  # 0.5초 뒤엔 다시 멈춤
+
+
+def test_flickering_judgement_times_out():
+    d = follow()
+    d.step(RAW_STOP, DT)
+    for i in range(45):
+        d.step(RAW_STOP if i % 2 else CLEAR, DT)
+    assert d.phase == "FOLLOW" and d.active                  # 2초 뒤 다시 출발, 멈춘 채 갇히지 않음
+
+
+def test_confirmed_during_cooldown_still_stops():
+    d = follow()
+    d.step(RAW_STOP, DT)
+    for _ in range(3):
+        d.step(CLEAR, DT)
+    out = d.step(CONFIRMED_STOP, DT)
+    assert out.done and out.result == "STOP_LINE"
+
+
+def test_corner_also_verified_while_stopped():
+    d = follow()
+    out = d.step(LineInput(0.0, True, LineEvent.NONE, LineEvent.CORNER_LEFT), DT)
+    assert out.linear == 0 and d.phase == "VERIFY CORNER_LEFT"
+
+
+def test_cancel_during_verify():
+    d = follow()
+    d.step(RAW_STOP, DT)
+    assert d.cancel().result == "STOPPED" and d.phase == "FOLLOW"
+
+
+def test_verify_stops_if_line_state_stops_arriving():
+    d = follow()
+    d.step(RAW_STOP, DT)
+    out = None
+    for _ in range(11):
+        out = d.step(None, DT)
+    assert out.done and out.result == "E_LINE"
 
 
 @pytest.mark.parametrize("event", [LineEvent.STOP_LINE, LineEvent.CORNER_LEFT, LineEvent.CORNER_RIGHT])
