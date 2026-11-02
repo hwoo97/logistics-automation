@@ -39,7 +39,7 @@
 | 코드 | 의미 |
 |------|------|
 | `E_CARGO` | 화물 인식 실패 (재시도 초과) |
-| `E_MARKER` | 분기점 목적지 마커 판단 불가 |
+| `E_MARKER` | 분기점 목적지 마커 판단 불가 (예약 — 2026-11-02 스티커 방식은 `E_LINE`·표지판 확인으로 처리) |
 | `E_SIGN` | 표지판이 기대 목적지와 다름 |
 | `E_LINE` | 라인 이탈·재탐색 실패 |
 | `E_TURN` | 회전 시간 제한 초과 |
@@ -56,8 +56,9 @@
 | `DEV POSE <LINE\|JUNCTION\|SIGN>` | `DEV POSE SIGN` | 팬틸트 정해진 자세 | `/pantilt/pose` | IDLE, MANUAL, ESTOP, ERROR |
 | `DEV SERVO <pan> <tilt>` | `DEV SERVO 90 60` | 팬·틸트 각도 직접 지정 (0~180°) | `/dev/pantilt_angle` | IDLE, MANUAL, ESTOP, ERROR |
 | `DEV WHEEL <l1> <l2> <l3> <l4>` | `DEV WHEEL 0.3 0.3 0 0` | 바퀴 4개 개별 듀티 (-1.0~1.0, 0.3초마다 반복, 끊기면 정지) | `/dev/wheels` | IDLE, MANUAL |
-| `DEV DRIVE <FOLLOW\|STOP>` | `DEV DRIVE FOLLOW` | 시험용 라인 주행 시작(drive_node FOLLOW_TO_EVENT)·정지(취소). 주행 중에는 `MANUAL ON`·`DEV WHEEL`·`DEV DRIVE FOLLOW` 거부. 결과는 `DEV DRIVE RUNNING` / `DEV DRIVE RECHECK 2/3`(라인 끝 후 정지해서 다시 보는 중) / `DEV DRIVE VERIFY STOP_LINE`(판정 후 정지해서 확인 중) / `DEV DRIVE DONE <끝난 이유>` / `DEV DRIVE REJECTED <이유>` | `/drive` 액션 | FOLLOW: IDLE, STOP: 모든 상태 |
-| `DEV TUNE <TURN\|CENTER\|CONFIRM\|LINE_END> <v>` | `DEV TUNE TURN 0.6` | 라인 주행 조정 — TURN 회전 세기(0.1~1.5), CENTER 라인 기준 위치(-0.5~0.5, 음수 = 화면 왼쪽) → `/drive/tune` · CONFIRM 정지선·코너 확정 프레임(1~10 정수), LINE_END 라인 끝 확정 프레임(3~30 정수) → `/line/tune`. 주행 중에도. 앱은 연결할 때마다 저장된 값을 다시 보냄 | `/drive/tune`·`/line/tune` (String "TURN 0.6") | 모든 상태 |
+| `DEV DRIVE <FOLLOW\|STOP>` | `DEV DRIVE FOLLOW` | 시험용 라인 주행 시작(drive_node FOLLOW_TO_EVENT)·정지(취소). 주행 중에는 `MANUAL ON`·`DEV WHEEL`·`DEV DRIVE FOLLOW` 거부. 결과는 `DEV DRIVE RUNNING` / `DEV DRIVE RECHECK 2/3`(라인 끝 후 정지해서 다시 보는 중) / `DEV DRIVE VERIFY STOP_LINE`(판정 후 정지해서 확인 중) / `DEV DRIVE MARKER red`(마커 앞에 멈춰 좌우 확인 중) / `DEV DRIVE TURN LEFT`(회전 중) / `DEV DRIVE DONE <끝난 이유>` / `DEV DRIVE REJECTED <이유>` | `/drive` 액션 | FOLLOW: IDLE, STOP: 모든 상태 |
+| `DEV TARGET <RED\|GREEN\|BLUE\|YELLOW\|NONE>` | `DEV TARGET RED` | 시험용 목적지 색, NONE이면 마커를 보지 않음. 주행 중에도. 앱은 연결할 때마다 다시 보냄 | `/drive/target` | 모든 상태 |
+| `DEV TUNE <TURN\|CENTER\|FORWARD\|SPIN\|CONFIRM\|LINE_END> <v>` | `DEV TUNE TURN 0.6` | 라인 주행 조정 — TURN 회전 세기(0.1~1.5), CENTER 라인 기준 위치(-0.5~0.5, 음수 = 화면 왼쪽), FORWARD 마커 회전 전 전진 시간(0~2초), SPIN 제자리 회전 세기(0.2~1) → `/drive/tune` · CONFIRM 정지선·코너 확정 프레임(1~10 정수), LINE_END 라인 끝 확정 프레임(3~30 정수) → `/line/tune`. 주행 중에도. 앱은 연결할 때마다 저장된 값을 다시 보냄 | `/drive/tune`·`/line/tune` (String "TURN 0.6") | 모든 상태 |
 | `DEV SPEED <v>` | `DEV SPEED 0.7` | 라인 주행 기본 속도 (0.2~1.0) — drive_node에 바로 적용, 주행 중에도 | `/drive/speed` | 모든 상태 |
 | `DEV WATCH <RANGE\|LINE\|SYS\|ALL> <ON\|OFF>` | `DEV WATCH RANGE ON` | 측정값 보내기 켜기/끄기 (연결 끊기면 모두 꺼짐) | — | 모든 상태 |
 | `DEV NODES` | `DEV NODES` | 실행 중인 ROS 노드 목록 요청 | — | 모든 상태 |
@@ -66,6 +67,7 @@
 | 메시지 | 예시 | 의미 |
 |--------|------|------|
 | `DEV RANGE <m>` | `DEV RANGE 0.234` | 초음파 거리(m, 필터 적용) — `/ultrasonic/range` |
+| `DEV MARKER [<색>:<left\|right>:<높이> ...]` | `DEV MARKER red:left:150` | 보이는 색 스티커 (없으면 `DEV MARKER`) — `/marker/state` |
 | `DEV LINE <offset> <event> [<raw_event> [<angle>]]` | `DEV LINE -0.12 NONE STOP_LINE 87.5` | 라인 오프셋(-1~1), 확정 이벤트, 이번 프레임 판정(확인 전, 생략 시 event와 같음), 라인 각도(도, 90 = 똑바로, 못 믿으면 `-`) — `/line/state` |
 | `DEV SYS <temp_c> <cpu_pct> <mem_pct>` | `DEV SYS 52.1 37 41` | Pi CPU 온도·사용률·메모리 (1Hz) |
 | `DEV NODES <이름,...>` | `DEV NODES camera,led_node,motor_node` | `DEV NODES` 응답 |

@@ -78,6 +78,17 @@ stop_line_node:
     confirm_frames: 3           # 노트북 앱 "확인 프레임"으로 조정
     hold_frames: 20             # 판정 후 이 프레임 동안 아래로 나가는 정지선도 인정
 
+marker_node:
+  ros__parameters:
+    # [H 시작, H 끝, S 최소, V 최소] (시작 > 끝이면 0을 넘어감) — 2026-11-02 책상 위 스티커 사진 기준, 트랙에서 다시 확인
+    red: [168, 10, 125, 125]
+    yellow: [24, 38, 120, 120]
+    green: [60, 85, 90, 70]
+    blue: [100, 116, 120, 90]
+    min_area: 30                # 먼 스티커 약 57px
+    min_fill: 0.5               # 면적 ÷ 외접 사각형
+    width_ratio: [0.5, 1.6]     # 가로 폭 ÷ 예상 지름 (지름 2cm 스티커 기준)
+
 drive_node:
   ros__parameters:
     rate_hz: 20.0
@@ -100,6 +111,24 @@ drive_node:
     verify_clear_frames: 5      # 정지선·코너 판정 후 멈춰서 확인 — 판정이 이만큼 연속 사라지면 다시 출발
     verify_timeout_s: 2.0       # 확정도 사라짐도 없으면 이 시간 뒤 다시 출발
     verify_cooldown_s: 0.5      # 다시 출발 후 이 시간은 판정으로 멈추지 않음
+    # 마커 — 목적지 색(/drive/target)이 정해졌을 때만 동작. 숫자는 초기값, 트랙에서 보정
+    marker_slow_y: 60.0         # 스티커가 이 높이 아래로 보이면 감속
+    marker_stop_y: 120.0        # 이 높이까지 내려오면 정지해서 좌우 확정 (양쪽이 함께 보이면 멈추지 않고 직진)
+    marker_check_y: 90.0        # 확정할 때 이 높이 아래의 스티커만 봄 (건너편 마커 제외)
+    marker_check_frames: 5      # 이만큼 보고 과반으로 좌우 확정
+    marker_settle_s: 0.3        # 멈춘 뒤 흔들림이 가라앉을 때까지 기다림
+    marker_check_timeout_s: 1.5 # 영상이 모자라도 이 시간이면 판단
+    marker_ignore_s: 2.0        # 직진·회전 뒤 이 시간은 마커 무시 (같은 마커 재인식 방지)
+    turn_forward_s: 0.7         # 회전 전 전진 시간 — 회전 중심을 분기점 가까이 (앱 "회전 전 전진"). 짧으면 갈래 라인을 못 만남
+    turn_speed: 0.6             # 제자리 회전 세기 (앱 "제자리 회전") — 약하면 안 돌고, 강하면 지나침
+    turn_min_s: 0.3             # 회전 시작 후 이 시간은 새 라인으로 인정 안 함
+    turn_clear_frames: 2        # 기존 라인이 이만큼 연속 안 보이면 새 라인을 찾기 시작
+    turn_jump_offset: 0.25      # 또는 오프셋이 도는 쪽으로 이만큼 튀면 (새 라인이 화면에 들어옴)
+    turn_accept_offset: 0.4     # 새 라인 인정: 기준 위치에서 이만큼 안쪽
+    turn_accept_deg: 35.0       # 새 라인 인정: 90° ± 이 각도 (T자 가로선 제외)
+    turn_seen_frames: 3         # 새 라인이 이만큼 연속 보이면 회전 끝
+    turn_timeout_s: 4.0         # 이 시간 안에 못 찾으면 정지·E_LINE — 실제 회전 속도를 보고 90°보다 조금 더 도는 시간으로 줄임
+    turn_settle_s: 1.0          # 회전 후 이 시간은 정지선·코너·라인 끝을 무시 (분기점 가로선 재검출 방지)
 
 bt_bridge_node:
   ros__parameters:

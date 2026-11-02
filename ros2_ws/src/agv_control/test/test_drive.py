@@ -1,7 +1,7 @@
 """DriveController·PidController — 가짜 라인 상태 순서로 시험 (Pi 없이)."""
 import pytest
 
-from agv_control.drive import DriveConfig, DriveController, LineInput, PidController
+from agv_control.drive import DriveConfig, DriveController, LineInput, MarkerInput, PidController
 from agv_protocol.types import DriveCommand, LineEvent
 
 DT = 0.05
@@ -325,3 +325,280 @@ def test_unknown_tune_key():
 
 def test_idle_outputs_zero():
     assert DriveController().step(LineInput(0.5, True), DT).linear == 0
+
+
+# ── 마커 ─────────────────────────────────────────────────
+
+AHEAD = LineInput(0.0, True, angle=90.0, angle_valid=True)
+GONE = LineInput(0.0, False)
+BAR = LineInput(0.0, True, angle=2.0, angle_valid=True)     # T자 가로선
+
+
+def marker_drive(target="red", **cfg):
+    d = DriveController(DriveConfig(**cfg))
+    d.set_target(target)
+    d.start(DriveCommand.FOLLOW_TO_EVENT)
+    return d
+
+
+def see(*sides, y=130.0, color="red"):
+    return [MarkerInput(color, s, y) for s in sides]
+
+
+def check(d, *sides, y=130.0):
+    """멈춘 뒤 확인 시간이 끝날 때까지 같은 마커를 본다."""
+    for _ in range(40):
+        d.step(AHEAD, DT, see(*sides, y=y))
+        if not d.phase.startswith("MARKER"):
+            break
+
+
+def run_forward(d):
+    while d.turn_stage == "FORWARD":
+        d.step(AHEAD, DT)
+
+
+def test_markers_ignored_without_target():
+    d = marker_drive(target=None)
+    assert d.step(AHEAD, DT, see("left", y=200.0)).linear > 0 and d.phase == "FOLLOW"
+
+
+def test_other_color_is_ignored():
+    d = marker_drive("red")
+    assert d.step(AHEAD, DT, see("left", y=200.0, color="blue")).linear > 0 and d.phase == "FOLLOW"
+
+
+def test_far_marker_slows_down_near_marker_stops():
+    c = DriveConfig()
+    d = marker_drive()
+    assert d.step(AHEAD, DT, see("left", y=30.0)).linear == pytest.approx(c.speed)      # 멀면 그대로
+    assert d.step(AHEAD, DT, see("left", y=80.0)).linear == pytest.approx(c.event_speed)
+    out = d.step(AHEAD, DT, see("left", y=125.0))
+    assert out.linear == 0 and out.angular == 0 and d.phase == "MARKER red"
+
+
+def test_slowdown_ends_when_marker_is_gone():
+    c = DriveConfig()
+    d = marker_drive()
+    d.step(AHEAD, DT, see("left", y=80.0))
+    assert d.step(AHEAD, DT, []).linear == pytest.approx(c.speed)
+
+
+@pytest.mark.parametrize("side, phase, sign", [("left", "TURN LEFT", 1), ("right", "TURN RIGHT", -1)])
+def test_one_side_turns_that_way(side, phase, sign):
+    d = marker_drive()
+    d.step(AHEAD, DT, see(side))
+    check(d, side)
+    assert d.phase == phase
+    assert d.step(AHEAD, DT).linear > 0                     # 먼저 전진
+    run_forward(d)
+    out = d.step(AHEAD, DT)
+    assert out.linear == 0 and out.angular * sign > 0
+
+
+def test_both_sides_in_one_frame_pass_without_stopping():
+    c = DriveConfig()
+    d = marker_drive()
+    out = d.step(AHEAD, DT, see("left", "right"))
+    assert out.linear > 0 and d.phase == "FOLLOW"
+    assert d.marker_ignore == pytest.approx(c.marker_ignore_s)
+    assert d.step(AHEAD, DT, see("left")).linear > 0 and d.phase == "FOLLOW"      # 지나가는 동안 다시 안 멈춤
+
+
+def test_both_sides_found_while_stopped_goes_straight():
+    d = marker_drive()
+    d.step(AHEAD, DT, see("left"))
+    check(d, "left", "right")
+    assert d.phase == "FOLLOW" and d.step(AHEAD, DT).linear > 0
+
+
+def test_marker_gone_while_checking_resumes():
+    """한 프레임 오인식 — 멈춰서 보니 없으면 다시 출발."""
+    d = marker_drive()
+    d.step(AHEAD, DT, see("left"))
+    for _ in range(40):
+        d.step(AHEAD, DT, [])
+        if d.phase == "FOLLOW":
+            break
+    assert d.phase == "FOLLOW" and d.step(AHEAD, DT, see("left")).linear > 0
+
+
+def test_check_times_out_without_frames():
+    d = marker_drive()
+    d.step(AHEAD, DT, see("left"))
+    for _ in range(int(DriveConfig().marker_check_timeout_s / DT) + 1):
+        d.step(AHEAD, DT)
+    assert d.phase == "FOLLOW"
+
+
+def test_check_ignores_frames_before_settle():
+    """멈추는 흔들림 동안 본 프레임은 세지 않음."""
+    d = marker_drive(marker_settle_s=0.5)
+    d.step(AHEAD, DT, see("left"))
+    for _ in range(5):
+        d.step(AHEAD, DT, see("right"))
+    assert d.check_counts == [0, 0, 0]
+
+
+def test_check_ignores_far_marker():
+    """확인 중 멀리(건너편) 보이는 같은 색은 세지 않음 → 왼쪽만."""
+    d = marker_drive()
+    d.step(AHEAD, DT, see("left"))
+    for _ in range(40):
+        d.step(AHEAD, DT, see("left") + see("right", y=50.0))
+        if not d.phase.startswith("MARKER"):
+            break
+    assert d.phase == "TURN LEFT"
+
+
+def turning(side="left", **cfg):
+    d = marker_drive(**cfg)
+    d.step(AHEAD, DT, see(side))
+    check(d, side)
+    run_forward(d)
+    return d
+
+
+def test_turn_does_not_end_on_old_line():
+    """회전 시작 때 보이는 기존 라인으로는 끝나지 않음."""
+    d = turning()
+    for _ in range(20):
+        d.step(AHEAD, DT)
+    assert d.phase == "TURN LEFT"
+
+
+def test_turn_does_not_end_on_t_bar():
+    """T자 가로선(각도가 눕음)은 새 라인이 아님."""
+    d = turning()
+    for _ in range(40):
+        d.step(BAR, DT)
+    assert d.phase == "TURN LEFT"
+
+
+def test_turn_does_not_end_on_line_at_screen_edge():
+    d = turning()
+    d.step(GONE, DT), d.step(GONE, DT)
+    edge = LineInput(-0.9, True, angle=90.0, angle_valid=True)
+    for _ in range(20):
+        d.step(edge, DT)
+    assert d.phase == "TURN LEFT"
+
+
+def test_turn_ends_on_new_line():
+    d = turning()
+    for _ in range(12):
+        d.step(GONE, DT)                                    # 기존 라인 벗어남 + 최소 시간 지남
+    d.step(AHEAD, DT), d.step(AHEAD, DT)
+    assert d.phase == "TURN LEFT"                           # 아직 2프레임
+    d.step(AHEAD, DT)
+    assert d.phase == "FOLLOW"
+    assert d.step(AHEAD, DT).linear > 0
+
+
+@pytest.mark.parametrize("side, sign", [("right", -1), ("left", 1)])
+def test_turn_new_line_enters_before_old_line_leaves(side, sign):
+    """광각 — 기존 라인이 화면에 남은 채 새 라인이 들어와 오프셋이 도는 쪽으로 튐. 끊김 없이도 새 라인에서 끝나야 함."""
+    d = turning(side)
+    for offset in (0.0, 0.1, 0.2, 0.3):                     # 기존 라인은 도는 쪽 반대로 밀림 (오른쪽으로 돌면 왼쪽으로)
+        d.step(LineInput(sign * offset, True, angle=90.0, angle_valid=True), DT)
+    for _ in range(8):
+        d.step(LineInput(-sign * 0.1, True, angle=90.0, angle_valid=True), DT)
+        if d.phase == "FOLLOW":
+            break
+    assert d.phase == "FOLLOW"
+
+
+def test_turn_old_line_sliding_away_is_not_a_jump():
+    """기존 라인이 조금씩 밀리는 동안(프레임당 0.1)은 새 라인으로 보지 않음."""
+    d = turning("right")
+    for i in range(4):
+        d.step(LineInput(-0.1 * i, True, angle=90.0, angle_valid=True), DT)
+    assert d.turn_stage == "LEAVE" and d.phase == "TURN RIGHT"
+
+
+def test_turn_accepts_tilted_new_line():
+    """회전 각도와 상관없음 — 비스듬한 라인도 허용 범위면 끝, 이후 각도 보정이 맞춘다."""
+    d = turning()
+    for _ in range(12):
+        d.step(GONE, DT)
+    tilted = LineInput(-0.3, True, angle=120.0, angle_valid=True)
+    for _ in range(3):
+        d.step(tilted, DT)
+    assert d.phase == "FOLLOW"
+    assert d.step(tilted, DT).angular > 0                   # 왼쪽 라인·왼쪽 기움 → 왼쪽으로
+
+
+def test_turn_needs_consecutive_frames():
+    d = turning()
+    for _ in range(8):
+        d.step(GONE, DT)
+    for _ in range(10):
+        d.step(AHEAD, DT), d.step(GONE, DT)
+    assert d.phase == "TURN LEFT"
+
+
+def test_turn_timeout_is_e_line():
+    c = DriveConfig()
+    d = turning()
+    out = None
+    for _ in range(int(c.turn_timeout_s / DT) + 1):
+        out = d.step(GONE, DT)
+    assert out.done and out.result == "E_LINE" and out.linear == 0 and out.angular == 0
+    assert not d.active and not d.turn_dir
+
+
+def finished_turn():
+    d = turning()
+    for _ in range(8):
+        d.step(GONE, DT)
+    for _ in range(3):
+        d.step(AHEAD, DT)
+    assert d.phase == "FOLLOW"
+    return d
+
+
+@pytest.mark.parametrize("event", [LineEvent.STOP_LINE, LineEvent.CORNER_LEFT, LineEvent.LINE_END])
+def test_events_ignored_right_after_turn(event):
+    """회전 때 잡힌 분기점 가로선이 확정돼 와도 멈추지 않음."""
+    d = finished_turn()
+    out = d.step(LineInput(0.0, True, event, event), DT)
+    assert out.linear > 0 and not out.done and d.phase == "FOLLOW"
+
+
+def test_events_work_again_after_settle():
+    d = finished_turn()
+    for _ in range(int(DriveConfig().turn_settle_s / DT) + 1):
+        d.step(AHEAD, DT)
+    out = d.step(LineInput(0.0, True, LineEvent.STOP_LINE, LineEvent.STOP_LINE), DT)
+    assert out.done and out.result == "STOP_LINE"
+
+
+def test_markers_ignored_right_after_turn_then_work():
+    d = finished_turn()
+    assert d.step(AHEAD, DT, see("left")).linear > 0 and d.phase == "FOLLOW"
+    for _ in range(int(DriveConfig().marker_ignore_s / DT) + 1):
+        d.step(AHEAD, DT)
+    d.step(AHEAD, DT, see("left"))
+    assert d.phase == "MARKER red"
+
+
+def test_cancel_during_turn_stops():
+    d = turning()
+    out = d.cancel()
+    assert out.done and out.linear == 0 and not d.turn_dir and d.phase == "FOLLOW"
+
+
+def test_line_timeout_during_turn():
+    d = turning()
+    out = None
+    for _ in range(int(DriveConfig().line_timeout_s / DT) + 2):
+        out = d.step(None, DT)
+        if out.done:
+            break
+    assert out.done and out.result == "E_LINE" and not d.turn_dir
+
+
+def test_tune_forward_and_spin():
+    d = marker_drive()
+    d.set_tune("FORWARD", 0.8), d.set_tune("SPIN", 0.5)
+    assert d.cfg.turn_forward_s == 0.8 and d.cfg.turn_speed == 0.5

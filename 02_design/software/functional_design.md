@@ -33,7 +33,7 @@
  │                                                                              │
  │  camera_ros ──/camera/image_raw──┬──► line_node ──/line/state──► drive_node  │
  │                                  ├──► stop_line_node ─/stop_line/state─► (drive_node) │
- │                                  ├──► marker_node   (서비스)        │  ▲      │
+ │                                  ├──► marker_node ─/marker/state─► (drive_node)        │
  │                                  ├──► classifier_node (서비스)      │  │      │
  │                                  └──► bt_bridge_node (영상)     /cmd_vel│      │
  │                                                                    ▼  │      │
@@ -51,7 +51,7 @@
 ```
 
 - `mission_node`가 전체 흐름(상태 머신)을 결정하고, `drive_node`는 "라인 따라가기·회전" 같은 주행 동작만 수행
-- 영상 처리는 필요한 노드만 켠다: 주행 중 `line_node`, 정지 중 `marker_node`/`classifier_node` (서비스 호출 시에만 처리)
+- 영상 처리: 주행 중 `line_node`·`stop_line_node`·`marker_node`가 프레임마다, `classifier_node`는 서비스 호출 시에만 처리
 
 ---
 
@@ -79,6 +79,7 @@
 | `/camera/image_raw` | sensor_msgs/Image | camera_ros → vision, bt | 15~30Hz | 카메라 영상 |
 | `/line/state` | agv_interfaces/LineState | line_node → drive_node, stop_line_node | 영상 주기 | 라인 오프셋, 이벤트 |
 | `/stop_line/state` | agv_interfaces/StopLineState | stop_line_node → drive_node, bt_bridge | 영상 주기 | 정지선 판정·확정·기울기 |
+| `/marker/state` | agv_interfaces/MarkerState | marker_node → drive_node, bt_bridge | 영상 주기 | 보이는 색 스티커의 색·좌우(라인 기준)·화면 높이 |
 | `/cmd_vel` | geometry_msgs/Twist | drive_node·mission(수동) → motor_node | 20Hz | 선속도 x, 각속도 z |
 | `/ultrasonic/range` | sensor_msgs/Range | ultrasonic_node → mission_node | 15Hz | 거리(m), 필터 적용 |
 | `/pantilt/pose` | std_msgs/String | mission_node → pantilt_node | 이벤트 | `LINE` / `JUNCTION` / `SIGN` |
@@ -89,7 +90,8 @@
 | `/safety/estop` | std_msgs/Bool | bt_bridge·mission → motor_node | 이벤트 | 비상 정지 래치 |
 | `/dev/wheels` | std_msgs/Float32MultiArray | bt_bridge → motor_node | 0.3초 반복 | 개발자 탭: L1~L4 듀티 (-1~1), 워치독 적용 |
 | `/drive/speed` | std_msgs/Float32 | bt_bridge → drive_node | 이벤트 | 개발자 탭 "주행 속도": 라인 주행 기본 선속도 (0.2~1.0), 주행 중에도 적용 |
-| `/drive/tune` | std_msgs/String | bt_bridge → drive_node | 이벤트 | 개발자 탭 "회전 세기"(`TURN 0.6`)·"라인 기준"(`CENTER -0.1`), 주행 중에도 적용 |
+| `/drive/tune` | std_msgs/String | bt_bridge → drive_node | 이벤트 | 개발자 탭 "회전 세기"(`TURN 0.6`)·"라인 기준"(`CENTER -0.1`)·"회전 전 전진"(`FORWARD 0.6`)·"제자리 회전"(`SPIN 0.6`), 주행 중에도 적용 |
+| `/drive/target` | std_msgs/String | bt_bridge(시험)·mission_node(예정) → drive_node | 이벤트 | 목적지 색 `red`/`green`/`blue`/`yellow`, `NONE`이면 마커를 보지 않음 |
 | `/line/tune` | std_msgs/String | bt_bridge → line_node, stop_line_node | 이벤트 | 개발자 탭 "확인 프레임"(`CONFIRM 3`)·"라인 끝 프레임"(`LINE_END 10`), 실행 중 적용 |
 | `/dev/pantilt_angle` | std_msgs/Float32MultiArray | bt_bridge → pantilt_node | 이벤트 | 개발자 탭: [팬, 틸트] 각도 |
 
@@ -97,7 +99,6 @@
 | 이름 | 종류 | 제공 | 요청 → 응답 |
 |------|------|------|-------------|
 | `/drive` | 액션 `agv_interfaces/Drive` | drive_node | 동작(`FOLLOW_TO_EVENT`, `TURN_LEFT`, `TURN_RIGHT`, `STRAIGHT`, `UTURN`, `APPROACH`, `STOP`) → 결과 이벤트·성공 여부 |
-| `/marker/detect` | 서비스 `agv_interfaces/DetectMarkers` | marker_node | (없음) → 갈래별 색 목록 `left[]`, `front[]`, `right[]` |
 | `/vision/classify` | 서비스 `agv_interfaces/Classify` | classifier_node | 모드(`CARGO` / `SIGN`) → 라벨, 신뢰도 |
 
 ### 사용자 정의 메시지 (agv_interfaces)
@@ -115,6 +116,11 @@ bool    angle_valid
 bool    detected        # 이번 프레임 판정 — drive_node는 처음 나오면 일단 정지
 bool    confirmed       # 확인 프레임만큼 쌓여 확정
 float32 angle           # 정지선 기울기(도), 0 = 수평, + = 오른쪽이 위
+
+# MarkerState.msg — 세 배열은 같은 길이
+string[]  colors         # red / yellow / green / blue
+string[]  sides          # left / right (라인 기준)
+float32[] y              # 화면 높이 — 클수록 차에 가까움
 
 # Status.msg
 string state            # 상태 머신 상태 이름
@@ -137,13 +143,6 @@ bool   success
 string result           # 끝난 이유: STOP_LINE / JUNCTION_* / CORNER_* / TURN_DONE / UTURN_DONE / STOPPED / E_TURN / E_LINE
 ---
 float32 offset          # 진행 중 피드백: 현재 라인 오프셋
-
-# DetectMarkers.srv
----
-string[] left
-string[] front
-string[] right
-bool     ok             # 영상 프레임 부족 등으로 판별 못 하면 false
 
 # Classify.srv
 string mode             # CARGO / SIGN
@@ -203,7 +202,7 @@ stateDiagram-v2
 ```
 FOLLOW_TO_EVENT ─► 이벤트?
    ├ CORNER_LEFT / CORNER_RIGHT ─► 정지 → 같은 방향 90° 회전 → FOLLOW 재개
-   ├ JUNCTION_* ─► 정지 → 팬틸트 JUNCTION → /marker/detect → 갈래 선택 → 회전/직진 → FOLLOW 재개
+   ├ 목적지 색 스티커 ─► 감속 → 정지·좌우 확정 → 왼쪽만 좌회전 / 오른쪽만 우회전 / 양쪽 직진 → FOLLOW 재개 (drive_node가 처리, 2026-11-02)
    ├ STOP_LINE ─► skip_stop_lines > 0 이면 1 줄이고 통과 / 아니면 정지 → CHECK_SIGN
    └ LINE_END (정지선 없이 끝) / 라인 이탈 ─► ERROR
 ```
@@ -216,21 +215,18 @@ FOLLOW_TO_EVENT ─► 이벤트?
 | 분기점에서 직진·회전 직후 | 같은 분기점의 가로 라인을 다시 이벤트로 검출 | `drive_node`는 STRAIGHT·TURN 완료 후 라인 이벤트가 사라질 때까지(최소 0.5초) 새 이벤트 무시 |
 | 하차 지점·대기장소 유턴 | 정지선이 유턴 후 차량 뒤쪽에 있음 | 규칙 불필요 (S8에서 확인) |
 
-### 분기점 갈래 선택 (색 마커 규칙)
-```python
-TARGET_COLOR = {"WORK": "blue", "DROP_A": "red", "DROP_B": "green", "PARK": "yellow"}
+### 분기점 판단 (색 마커 규칙, 2026-11-02 결정)
+목적지 색 스티커의 **라인 기준 위치**가 방향을 정한다. 스티커는 분기점에 들어오는 라인의 옆에 붙인다.
 
-def choose_branch(markers, target):          # markers: {"left": [...], "front": [...], "right": [...]}
-    color = TARGET_COLOR[target]
-    hits = [b for b, colors in markers.items() if color in colors]
-    if len(hits) != 1:
-        raise MarkerError(f"{color} 마커 갈래 {len(hits)}개")   # → ERROR 상태
-    return {"left": "TURN_LEFT", "front": "STRAIGHT", "right": "TURN_RIGHT"}[hits[0]]
-```
-- 들어온 갈래(뒤쪽) 마커가 화면 아래쪽에 보일 수 있음 → 화면 아래 가운데 영역(back)은 판별에서 제외 (영역 경계는 S5에서 보정)
-- 마커 판별은 여러 프레임 다수결(예: 10프레임 중 7프레임 이상 일치)
+| 목적지 색이 보이는 곳 | 동작 |
+|---|---|
+| 왼쪽만 | 좌회전 |
+| 오른쪽만 | 우회전 |
+| 양쪽 | 직진 (양쪽이 한 프레임에 보이면 멈추지 않음) |
+| 안 보임 | 라인을 따라 계속 주행 |
 
----
+- 다른 색만 보여도 오류로 보지 않는다 — 분기점을 지난 직후에도 다른 방향용 스티커가 정상적으로 보이기 때문. **스티커가 모두 떨어지면 그 자리에서 알 수 없고** T자는 `LINE_END`로 멈추며, 직진 갈래가 있는 곳은 도착 후 표지판 확인으로 잡는다
+- 직진 스티커 2장 중 1장만 떨어지면 회전으로 잘못 읽는다 → 라인을 못 찾으면 시간 제한으로 `E_LINE`. 제한 시간은 90°보다 조금 더 도는 시간으로 맞춘다 (길면 들어온 라인까지 돌아가 되돌아갈 수 있음)
 
 ## 7. 기능별 상세 설계
 
@@ -286,12 +282,20 @@ def choose_branch(markers, target):          # markers: {"left": [...], "front":
 - 회전 속도·전진 거리는 S2·S8에서 보정
 
 ### F6 · 색 마커 판별 (`marker_node`)
-- **분기점 판단도 마커가 맡음 (2026-10-30 결정)**: 라인 검출은 분기점 이벤트를 내지 않으므로, 주행 중(LINE 자세) 영상에서 색 마커가 보이면 감속·정지해 분기점으로 판단 → 마커 인식 작업 때 이 절과 상태 머신(drive_node 이벤트)을 함께 고친다. 확인할 것: LINE 자세(틸트 150°)에서 갈래 시작 마커가 보이는 거리, 주행 중 놓치지 않는지
-- 팬틸트 JUNCTION 자세에서 호출
-- HSV 범위로 4색 마스크 → 잡음 제거(열림 연산) → 면적 기준 이상 덩어리만 마커로 인정
-- 마커 중심 위치로 갈래 분류: 화면 왼쪽 영역 = left, 위쪽 중앙 = front, 오른쪽 = right, **아래쪽 중앙 = back(들어온 갈래, 제외)**
-- 10프레임 다수결, 결과 `{left: [...], front: [...], right: [...]}`
-- HSV 범위는 S4에서 조명 2가지로 보정해 `params.yaml`에 저장
+- 마커 = 지름 약 2cm 원형 스티커. 카메라 자세는 LINE 그대로 (JUNCTION 자세로 바꾸지 않음)
+- 처리 (`agv_vision/marker.py`): 320×240 → HSV → 색별 범위 → 열림(3×3) → 연결 성분 → 스티커 조건 (면적 ≥ 30, 면적 ÷ 외접 사각형 ≥ 0.5, 가로 폭 = 높이별 예상 지름의 0.5~1.6배, 세로 ≤ 2배)
+- 좌우는 **라인 기준** (카메라가 차체 중심에서 비켜 있음). 라인이 기울면 라인 각도로 스티커 높이의 라인 위치를 계산해 비교
+- HSV 범위 (2026-11-02 책상 위 실제 스티커 사진, 트랙에서 다시 확인): 빨강 H168~10·S≥125·V≥125, 노랑 H24~38·S≥120·V≥120, 초록 H60~85·S≥90·V≥70 (가장 약함), 파랑 H100~116·S≥120·V≥90 → `params.yaml`
+- 출력 `/marker/state`: 색, 좌우, 화면 높이 — 높이는 거리 대신 쓰고, 앱 "MARKER" 측정값으로 확인
+- 판단은 `drive_node` (`DriveController`, 목적지 색이 정해졌을 때만):
+  1. 주행 중 목적지 색이 y ≥ 60에 보이면 감속, y ≥ 120까지 오면 정지 — 높이로 정해서 속도와 상관없이 비슷한 자리에 섬
+  2. 0.3초 뒤부터 5프레임을 보고 과반으로 좌우 확정 (y ≥ 90만 — 건너편 스티커 제외). 사라지면 오판정으로 보고 다시 출발
+  3. 회전: **전진** (회전 중심을 분기점 가까이, 카메라가 차축보다 앞을 보기 때문) → **제자리 회전** → 기존 라인이 벗어난 뒤 새 라인이 보이면 끝 → 라인 주행. 회전 각도는 재지 않는다 (엔코더 없음)
+     - 기존 라인이 벗어남: 라인이 인정 범위 밖으로 2프레임, 또는 오프셋이 도는 쪽으로 0.25 이상 튐 (광각이라 기존 라인이 나가기 전에 새 라인이 들어옴)
+     - 새 라인 인정: 기준 위치 ± 0.4, 각도 90 ± 35° (T자 가로선 제외), 3프레임 연속
+     - 4초 안에 못 찾으면 정지·`E_LINE`
+  4. 회전 뒤 1초는 정지선·코너·라인 끝 무시, 직진·회전 뒤 2초는 마커 무시 (같은 표시 재인식 방지)
+- 전진 시간은 스티커 위치와 실제 속도에 맞춰 앱 "회전 전 전진"으로 조정
 
 ### F7 · 화물·표지판 인식 (`classifier_node`)
 - Teachable Machine 이미지 모델 → TFLite 변환 → LiteRT(`ai-edge-litert`)로 추론, 입력 224×224

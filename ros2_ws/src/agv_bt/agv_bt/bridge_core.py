@@ -132,6 +132,8 @@ class BridgeCore:
             self.io.drive(rest[0])
         elif sub == "TUNE":
             self.io.tune(rest[0], float(rest[1]))
+        elif sub == "TARGET":
+            self.io.target(rest[0])
         elif sub == "WATCH":
             keys = WATCH_KEYS if rest[0] == "ALL" else (rest[0],)
             for k in keys:

@@ -4,7 +4,8 @@
 
 /line/state를 받아 라인을 따라가고, 이벤트(정지선·코너·라인 끝)·라인 끊김·비상 정지·취소에서 멈춘다.
 /drive/speed(Float32, 노트북 앱 DEV SPEED)로 기본 속도, /drive/tune(String "TURN 0.6"·"CENTER -0.1", DEV TUNE)으로
-회전 세기·라인 기준 위치를 주행 중에도 바꾼다.
+회전 세기·라인 기준 위치를 주행 중에도 바꾼다. /drive/target(String "red"·"NONE", DEV TARGET)이 정해지면
+/marker/state를 보고 목적지 색 스티커 쪽으로 돈다 (NONE이면 마커를 보지 않음).
 동작 중이 아닐 때는 /cmd_vel을 보내지 않는다 (노트북 앱 수동 조종과 겹치지 않게).
 """
 import threading
@@ -19,9 +20,9 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool, Float32, String
 
-from agv_control.drive import DriveConfig, DriveController, LineInput, merge_stop_line
+from agv_control.drive import DriveConfig, DriveController, LineInput, MarkerInput, merge_stop_line
 from agv_interfaces.action import Drive
-from agv_interfaces.msg import LineState, StopLineState
+from agv_interfaces.msg import LineState, MarkerState, StopLineState
 from agv_protocol.types import DriveCommand, LineEvent
 
 
@@ -51,6 +52,7 @@ class DriveNode(Node):
         self.result = ""
         self.estop = False
         self.stop_line = (False, False, 0.0)        # 마지막 정지선 판정 (있음, 확정, 받은 시각)
+        self.markers: list[MarkerInput] | None = None   # 마지막 주기 이후 새로 받은 마커 상태
 
         group = ReentrantCallbackGroup()
         self.pub = self.create_publisher(Twist, "/cmd_vel", QoSProfile(depth=1))
@@ -58,6 +60,9 @@ class DriveNode(Node):
                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT), callback_group=group)
         self.create_subscription(StopLineState, "/stop_line/state", self.on_stop_line,
                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT), callback_group=group)
+        self.create_subscription(MarkerState, "/marker/state", self.on_marker,
+                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT), callback_group=group)
+        self.create_subscription(String, "/drive/target", self.on_target, QoSProfile(depth=10), callback_group=group)
         self.create_subscription(Bool, "/safety/estop", self.on_estop, QoSProfile(depth=10), callback_group=group)
         self.create_subscription(Float32, "/drive/speed", self.on_speed, QoSProfile(depth=10), callback_group=group)
         self.create_subscription(String, "/drive/tune", self.on_tune, QoSProfile(depth=10), callback_group=group)
@@ -83,6 +88,17 @@ class DriveNode(Node):
         with self.lock:
             self.stop_line = (bool(msg.detected), bool(msg.confirmed), time.monotonic())
 
+    def on_marker(self, msg: MarkerState):
+        with self.lock:
+            self.markers = [MarkerInput(c, s, float(y)) for c, s, y in zip(msg.colors, msg.sides, msg.y)]
+
+    def on_target(self, msg: String):
+        """목적지 색 — 지금은 노트북 앱 (DEV TARGET), 나중에 mission_node."""
+        color = None if msg.data == "NONE" else msg.data
+        with self.lock:
+            self.ctrl.set_target(color)
+        self.get_logger().info(f"목적지 색 {msg.data}")
+
     def on_estop(self, msg: Bool):
         with self.lock:
             self.estop = bool(msg.data)
@@ -98,7 +114,7 @@ class DriveNode(Node):
         self.get_logger().info(f"주행 속도 {value:.2f}")
 
     def on_tune(self, msg: String):
-        """노트북 앱 "회전 세기"·"라인 기준 위치" (DEV TUNE) — "TURN 0.6", "CENTER -0.1"."""
+        """노트북 앱 "회전 세기"·"라인 기준"·"회전 전 전진"·"제자리 회전" (DEV TUNE) — "TURN 0.6", "CENTER -0.1"."""
         try:
             key, value = msg.data.split()
             with self.lock:
@@ -126,7 +142,8 @@ class DriveNode(Node):
             if not self.ctrl.active:
                 return
             line, self.line = self.line, None
-            out = self.ctrl.step(line, 1.0 / self.rate)
+            markers, self.markers = self.markers, None
+            out = self.ctrl.step(line, 1.0 / self.rate, markers)
             self.out = out
             self._publish(out.linear, out.angular)
             if out.done:
@@ -152,7 +169,7 @@ class DriveNode(Node):
                 self._finish("STOPPED")
             self.finished.clear()
             self.result = ""
-            self.line = None
+            self.line = self.markers = None
             self.ctrl.start(DriveCommand(command))
         self.get_logger().info(f"시작: {command}")
         feedback = Drive.Feedback()

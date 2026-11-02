@@ -24,6 +24,11 @@ from agv_protocol.types import Cargo, State, Target
     ("DEV TUNE CENTER -0.1", "DEV", ["TUNE", "CENTER", "-0.1"]),
     ("DEV tune confirm 3", "DEV", ["TUNE", "CONFIRM", "3"]),
     ("DEV TUNE LINE_END 10", "DEV", ["TUNE", "LINE_END", "10"]),
+    ("DEV TUNE FORWARD 0.4", "DEV", ["TUNE", "FORWARD", "0.4"]),
+    ("DEV TUNE SPIN 0.6", "DEV", ["TUNE", "SPIN", "0.6"]),
+    ("DEV target red", "DEV", ["TARGET", "RED"]),
+    ("DEV TARGET NONE", "DEV", ["TARGET", "NONE"]),
+    ("DEV WATCH MARKER ON", "DEV", ["WATCH", "MARKER", "ON"]),
 ])
 def test_parse_valid(line, kind, args):
     cmd = parse_command(line)
@@ -37,6 +42,7 @@ def test_parse_valid(line, kind, args):
     "DEV SPEED", "DEV SPEED 0.1", "DEV SPEED 1.5", "DEV SPEED fast", "DEV SPEED 0.5 0.5",
     "DEV DRIVE", "DEV DRIVE GO", "DEV DRIVE FOLLOW STOP",
     "DEV TUNE", "DEV TUNE TURN", "DEV TUNE KP 1", "DEV TUNE TURN 2", "DEV TUNE CENTER -0.7", "DEV TUNE TURN x",
+    "DEV TARGET", "DEV TARGET PINK", "DEV TUNE FORWARD 3", "DEV TUNE SPIN 0.1",
     "DEV TUNE CONFIRM 0", "DEV TUNE CONFIRM 2.5", "DEV TUNE LINE_END 2", "DEV TUNE LINE_END 31",
 ])
 def test_parse_invalid(line):
@@ -141,3 +147,9 @@ def test_dev_replies():
 def test_parse_reply_invalid(line):
     with pytest.raises(ValueError):
         parse_reply(line)
+
+
+def test_dev_marker_reply():
+    assert parse_reply(format_dev("MARKER", "red:left:150", "blue:right:90"))["markers"] == [
+        ("red", "left", 150.0), ("blue", "right", 90.0)]
+    assert parse_reply(format_dev("MARKER"))["markers"] == []

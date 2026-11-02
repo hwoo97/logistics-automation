@@ -45,8 +45,8 @@
 logistics-automation/
 ├─ ros2_ws/src/
 │  ├─ agv_interfaces/               # ament_cmake — 메시지·서비스·액션 정의
-│  │  ├─ msg/  LineState.msg  StopLineState.msg  Status.msg  Command.msg
-│  │  ├─ srv/  DetectMarkers.srv  Classify.srv
+│  │  ├─ msg/  LineState.msg  StopLineState.msg  MarkerState.msg  Status.msg  Command.msg
+│  │  ├─ srv/  Classify.srv
 │  │  ├─ action/  Drive.action
 │  │  ├─ CMakeLists.txt  package.xml
 │  │
@@ -66,7 +66,7 @@ logistics-automation/
 │  │
 │  ├─ agv_control/                  # 주행·상태 머신
 │  │  └─ agv_control/
-│  │     ├─ pid.py  drive_controller.py  state_machine.py  branch_selector.py
+│  │     ├─ pid.py  drive_controller.py  state_machine.py
 │  │     ├─ drive_node.py  mission_node.py
 │  │
 │  ├─ agv_bt/                       # 블루투스 브리지
@@ -114,19 +114,18 @@ logistics-automation/
 |------|--------------|-------------|
 | `line_detect.py` | `LineDetector.process(bgr) -> LineResult` | 영상 → 오프셋, 라인 유무, 각도, 이벤트(CORNER_*·LINE_END) + 연속 프레임 확정 |
 | `stop_line.py` | `StopLineDetector.process(bgr, offset) -> StopLineResult` | 영상·오프셋 → 정지선 판정(세로 열 방식)·확정·기울기 |
-| `marker_detector.py` | `MarkerDetector.detect(bgr) -> dict[str, list[str]]` | 영상 → 갈래별 색 목록, `vote(frames)` 다수결 |
+| `marker.py` | `MarkerDetector.process(bgr, offset, angle) -> list[Marker]` | 영상 + 라인 위치 → 색 스티커의 색·좌우(라인 기준)·화면 높이 |
 | `classifier.py` | `TfliteClassifier.predict(bgr) -> (label, score)`, `decide(results)` | LiteRT 추론, 5프레임 판정 규칙 |
 | `line_node.py` | `LineNode` | 영상 구독(최신 1장) → `/line/state` 발행 |
 | `stop_line_node.py` | `StopLineNode` | 영상 + `/line/state` 오프셋 → `/stop_line/state` 발행 |
-| `marker_node.py` | `MarkerNode` | `/marker/detect` 요청 시 최근 프레임 10장으로 판별 |
+| `marker_node.py` | `MarkerNode` | 프레임마다 판별, `/marker/state` 발행 |
 | `classifier_node.py` | `ClassifierNode` | `/vision/classify` 요청 시 모델(CARGO/SIGN) 선택 → 판정 |
 
 ### agv_control — 주행·상태 머신
 | 모듈 | 클래스 / 함수 | 책임 |
 |------|--------------|------|
 | `pid.py` | `PidController` | 오프셋 → 각속도 |
-| `drive_controller.py` | `DriveController` | 동작별 단계 진행(FOLLOW·TURN·UTURN·APPROACH) — 입력: 라인 상태, 출력: 속도 명령·완료 이벤트 |
-| `branch_selector.py` | `choose_branch(markers, target)` | 목적지 색 갈래 선택, 정확히 1개 아니면 `MarkerError` |
+| `drive_controller.py` | `DriveController` | 동작별 단계 진행(FOLLOW·UTURN·APPROACH, FOLLOW 안에서 마커 확인·회전) — 입력: 라인·마커 상태, 출력: 속도 명령·완료 이벤트 |
 | `state_machine.py` | `MissionStateMachine.handle(event) -> list[Action]` | 기능 설계서 5절 상태 머신. 이벤트(START, STOP_LINE, SIGN, RANGE, CARGO, TIMEOUT…) → 동작(drive, pantilt, led, classify, report…) |
 | `drive_node.py` | `DriveNode` | `/drive` 액션 서버, `DriveController` 실행, `/cmd_vel` 발행 |
 | `mission_node.py` | `MissionNode` | 토픽·서비스 결과를 이벤트로 바꿔 상태 머신에 넣고, 나온 동작을 실행 |
@@ -186,7 +185,7 @@ motor_node:      { ros__parameters: { duty_max: 0.75, pwm_hz: 1000, wheel_map: [
 pantilt_node:    { ros__parameters: { pan_channel: 0, tilt_channel: 1, poses: { LINE: [70, 130], JUNCTION: [65, 165], SIGN: [65, 180] } } }
 line_node:       { ros__parameters: { roi_ratio: 0.33, confirm_frames: 3 } }
 stop_line_node:  { ros__parameters: { width_ratio: [3.0, 12.0], min_thickness: 0.65, confirm_frames: 3 } }
-marker_node:     { ros__parameters: { hsv: { red: [...], green: [...], blue: [...], yellow: [...] }, min_area: 200, vote_frames: 10 } }
+marker_node:     { ros__parameters: { red: [168, 10, 125, 125], yellow: [...], green: [...], blue: [...], min_area: 30 } }
 classifier_node: { ros__parameters: { cargo_model: models/cargo.tflite, sign_model: models/sign.tflite, min_score: 0.8 } }
 ultrasonic_node: { ros__parameters: { rate_hz: 15, median_window: 5 } }
 mission_node:    { ros__parameters: { load_distance: 0.10, load_hold_s: 3.0, obstacle_distance: 0.15, obstacle_clear_s: 1.0, cargo_retry: 2 } }
@@ -213,7 +212,7 @@ bt_bridge_node:  { ros__parameters: { heartbeat_timeout_s: 1.5, video_fps: 5, vi
 
 | 수준 | 대상 | 어디서 | 방법 |
 |------|------|--------|------|
-| 단위 | ② 알고리즘 (LineDetector, MarkerDetector, PidController, branch_selector, MissionStateMachine, agv_protocol) | 노트북·Pi | `pytest`. 영상 알고리즘은 테스트 트랙에서 찍은 **사진 묶음**으로 검사 |
+| 단위 | ② 알고리즘 (LineDetector, MarkerDetector, PidController, DriveController, MissionStateMachine, agv_protocol) | 노트북·Pi | `pytest`. 영상 알고리즘은 테스트 트랙에서 찍은 **사진 묶음**으로 검사 |
 | 시나리오 | MissionStateMachine 1사이클 | 노트북·Pi | 이벤트 순서를 넣어 기대 동작 목록 비교 (S10 흐름을 코드로 재현) |
 | 노드 | 각 노드 + 가짜 드라이버 | Pi | `use_fake_hw: true`로 launch, `ros2 topic echo`로 확인 |
 | 하드웨어 | 실제 드라이버 | Pi + 차량 | `04_unit/<기능>/` 점검 스크립트, 결과는 `test.md` |
@@ -249,7 +248,7 @@ bt_bridge_node:  { ros__parameters: { heartbeat_timeout_s: 1.5, video_fps: 5, vi
 | 1 | `agv_interfaces`, `agv_protocol`, `agv_bringup` 골격 | 빌드 |
 | 2 | 드라이버 4종(실제·가짜) + hw 노드 4개, camera_ros 설정 | S0 |
 | 3 | `LineDetector` + `line_node`, `StopLineDetector` + `stop_line_node`, `PidController` + `DriveController` + `drive_node` | S1~S3, S8 |
-| 4 | `MarkerDetector` + `marker_node`, `branch_selector` | S4, S5 |
+| 4 | `MarkerDetector` + `marker_node`, `DriveController` 마커 확인·회전 | S4, S5 |
 | 5 | 노트북 앱 + `agv_bt` (제어 채널 먼저, 영상 나중) | S0 |
 | 6 | `TfliteClassifier` + `classifier_node` (데이터 수집 → 학습) | S6, S7 |
 | 7 | `MissionStateMachine` + `mission_node` | 시나리오 테스트 → S9, S10 |

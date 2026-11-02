@@ -250,7 +250,7 @@ class MarkerConfig:
 | `LineDetector` | `process(bgr) -> LineResult` | 축소 → 하단 ROI → 회색조 → Otsu 이진화(검정) → 오프셋 계산 → 이벤트 판정 → `EventConfirmer`로 연속 확인 |
 | | `detect_event(mask) -> LineEvent` | 위쪽 행의 가로 폭·양끝 도달·앞쪽 라인 유무로 기능 설계서 F4 표에 따라 판정 |
 | `EventConfirmer` | `push(event) -> LineEvent` | 같은 이벤트가 `frames`번 연속이면 반환, 아니면 `NONE` |
-| `MarkerDetector` | `detect(bgr) -> MarkerResult` | HSV 마스크 → 열림 연산 → 면적 필터 → 중심 x·y로 left/front/right 분류, 아래 가운데(back = 들어온 갈래) 영역은 버림 |
+| `MarkerDetector` | `process(bgr, offset, angle) -> list[Marker]` | HSV 마스크 → 열림 연산 → 면적·모양·크기 필터 → 라인 기준 좌우, 화면 높이 |
 | | `vote(results) -> MarkerResult` | 갈래·색별로 `vote_ratio` 이상 나온 것만 남김 |
 | `TfliteClassifier` | `__init__(model_path, labels_path)`, `predict(bgr) -> Prediction` | 224×224 리사이즈 → LiteRT 추론 → 최고 점수 라벨 |
 | `ClassificationJudge` | `decide(preds) -> str \| None` | `score ≥ 0.8`인 같은 라벨이 3개 이상이면 그 라벨, `background`거나 미달이면 `None` |
@@ -259,7 +259,7 @@ class MarkerConfig:
 | 클래스 | 구독 / 서비스 | 주요 메서드 |
 |--------|--------------|-------------|
 | `LineNode` | 구독 `/camera/image_raw`(최신 1장) → 발행 `/line/state`, 파라미터 `enabled` | `on_image(msg)` → `cv_bridge` 변환 → `detector.process()` → 발행 |
-| `MarkerNode` | 구독 영상(최근 10장 링버퍼), 서비스 `/marker/detect` | `on_image()`, `on_detect(req, res)` → `vote([detect(f) for f in buffer])` |
+| `MarkerNode` | 구독 영상·`/line/state`, 발행 `/marker/state` | `on_line()`, `on_image()` → `process()` |
 | `ClassifierNode` | 구독 영상(최근 5장), 서비스 `/vision/classify` | `on_classify(req, res)` → 모드별 모델 선택 → `predict` × 5 → `judge.decide()` |
 
 ---
@@ -403,17 +403,7 @@ class MissionStateMachine:
 | AT_JUNCTION | `MARKERS` → `choose_branch` 성공 | `POSE(LINE)`, `DRIVE(TURN_LEFT 등)` | NAVIGATE |
 | AT_JUNCTION | `MARKERS` → `MarkerError` | `LED(ERROR)`, `REPORT(error=E_MARKER)` | ERROR |
 
-```python
-class MarkerError(Exception): ...
-
-def choose_branch(markers: MarkerResult, target: Target) -> DriveCommand:   # branch_selector.py
-    color = TARGET_COLOR[target]
-    hits = [name for name, colors in markers.as_dict().items() if color in colors]
-    if len(hits) != 1:
-        raise MarkerError(f"{color} 갈래 {len(hits)}개")
-    return {"left": DriveCommand.TURN_LEFT, "front": DriveCommand.STRAIGHT,
-            "right": DriveCommand.TURN_RIGHT}[hits[0]]
-```
+목적지 색 스티커의 좌우 판단과 회전은 `DriveController`가 맡는다 (2026-11-02, functional_design F6). `mission_node`는 `/drive/target`으로 목적지 색만 정한다. 아래 표의 `AT_JUNCTION`·`DETECT_MARKERS`·`MARKERS`는 이전 방식이며 상태 머신 작업 때 정리한다.
 
 ### 3.3 노드
 | 클래스 | 구성 | 주요 메서드 |
@@ -602,11 +592,11 @@ sequenceDiagram
 | 클래스·함수 | 테스트 예 |
 |-------------|-----------|
 | `LineDetector` | 직선·코너·T자·정지선 사진 → 기대 이벤트, 오프셋 부호 |
-| `MarkerDetector` | 4색·2색 패치 사진 → 갈래별 색 목록 |
+| `MarkerDetector` | 합성·실제 스티커 사진 → 색·좌우·높이, 크기·모양이 다르면 제외 |
 | `ClassificationJudge` | 점수 목록 → 확정/미확정 |
 | `PidController` | 계단 입력 → 출력 방향·크기 |
 | `DriveController` | 가짜 LineResult 순서 → 단계 전이, 시간 초과 |
-| `choose_branch` | 6가지 분기 상황(테스트 트랙 S10 판단표) + 마커 0개·2개 오류 |
+| `DriveController` 마커 | 왼쪽·오른쪽·양쪽·사라짐, 회전 끝 조건, 시간 초과 |
 | `MissionStateMachine` | 1사이클 이벤트 순서 → 기대 동작 목록, 장애물·비상 정지·오류 경로 |
 | `agv_protocol` | 명령·응답 문자열 왕복, 프레임 분할 수신 |
 | `MedianFilter` | None·이상값 제거 |

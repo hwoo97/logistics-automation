@@ -49,12 +49,18 @@ def test_dev_commands_reach_io(core):
                                                          "DEV NODES"]
 
 
+def test_target_reaches_io(core):
+    c, io = core
+    c.on_line("DEV TARGET RED")
+    assert ("target", "RED") in io.calls
+
+
 def test_watch(core):
     c, _ = core
     c.on_line("DEV WATCH ALL ON")
-    assert c.watches == {"RANGE", "LINE", "SYS"}
+    assert c.watches == {"RANGE", "LINE", "MARKER", "SYS"}
     c.on_line("DEV WATCH LINE OFF")
-    assert c.watches == {"RANGE", "SYS"}
+    assert c.watches == {"RANGE", "MARKER", "SYS"}
 
 
 def test_invalid_and_start_rejected(core):

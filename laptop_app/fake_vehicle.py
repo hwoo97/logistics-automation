@@ -156,6 +156,8 @@ class FakeVehicle:
             self.drive_speed = float(rest[0])
         elif sub == "TUNE":
             setattr(self, "drive_" + rest[0].lower(), float(rest[1]))   # drive_turn, drive_center
+        elif sub == "TARGET":
+            self.drive_target = rest[0]
         elif sub == "DRIVE":
             if rest[0] == "FOLLOW":
                 self.drive_end = now + 6.0 / self.drive_speed      # 빠를수록 일찍 도착

@@ -18,7 +18,7 @@ from agv_bt.sysinfo import SysMonitor
 from agv_bt.video_streamer import VideoStreamer
 from agv_protocol.messages import LINE_TUNE_KEYS, format_dev
 
-WATCH_PERIOD_S = 0.2            # RANGE·LINE 5Hz
+WATCH_PERIOD_S = 0.2            # RANGE·LINE·MARKER 5Hz
 
 
 class BtBridgeNode(Node):
@@ -39,6 +39,7 @@ class BtBridgeNode(Node):
         self.sys = SysMonitor()
         self._last_range_sent = 0.0
         self._last_line_sent = 0.0
+        self._last_marker_sent = 0.0
         self._stop_line = (False, False, 0.0)                 # 마지막 정지선 판정 (있음, 확정, 받은 시각)
 
         q10 = QoSProfile(depth=10)
@@ -51,13 +52,15 @@ class BtBridgeNode(Node):
         self.pub_speed = self.create_publisher(Float32, "/drive/speed", q10)
         self.pub_tune = self.create_publisher(String, "/drive/tune", q10)
         self.pub_line_tune = self.create_publisher(String, "/line/tune", q10)
+        self.pub_target = self.create_publisher(String, "/drive/target", q10)
         self.create_subscription(Range, "/ultrasonic/range", self.on_range, qos_profile_sensor_data)
         self.create_subscription(Image, camera_topic, self.on_image, qos_profile_sensor_data)
         try:                                                  # agv_interfaces가 없으면 LINE만 빠짐
-            from agv_interfaces.msg import LineState, StopLineState
+            from agv_interfaces.msg import LineState, MarkerState, StopLineState
             best_effort = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
             self.create_subscription(LineState, "/line/state", self.on_line_state, best_effort)
             self.create_subscription(StopLineState, "/stop_line/state", self.on_stop_line, best_effort)
+            self.create_subscription(MarkerState, "/marker/state", self.on_marker_state, best_effort)
         except ImportError:
             self.get_logger().warn("agv_interfaces 없음 — DEV LINE 보내지 않음")
         self.drive_client, self._drive_goal = None, None    # 노트북 앱 "라인 주행 시작/정지" → /drive 액션
@@ -115,6 +118,10 @@ class BtBridgeNode(Node):
         else:
             self.pub_tune.publish(String(data=f"{key} {float(value)}"))
 
+    def target(self, color):
+        """DEV TARGET — 시험용 목적지 색. drive_node는 소문자 색 이름 또는 NONE을 받는다."""
+        self.pub_target.publish(String(data="NONE" if color == "NONE" else color.lower()))
+
     def drive(self, action):
         """DEV DRIVE FOLLOW|STOP — drive_node에 FOLLOW_TO_EVENT 목표를 보내거나 취소. 결과는 DEV DRIVE로 알림."""
         if self.drive_client is None:
@@ -136,12 +143,13 @@ class BtBridgeNode(Node):
         future.add_done_callback(self._on_drive_accepted)
 
     def _on_drive_feedback(self, msg):
-        """단계가 바뀔 때만 앱에 알림 — 라인 끝 재확인(RECHECK 2/3), 정지선·코너 확인(VERIFY STOP_LINE), 다시 출발(RUNNING)."""
+        """단계가 바뀔 때만 앱에 알림 — 라인 끝 재확인(RECHECK 2/3), 정지선·코너 확인(VERIFY STOP_LINE),
+        마커 확인(MARKER red), 회전(TURN LEFT), 다시 출발(RUNNING)."""
         phase = msg.feedback.phase
         if phase == self._drive_phase:
             return
         self._drive_phase = phase
-        if phase.startswith(("RECHECK", "VERIFY")):             # "RECHECK 2/3", "VERIFY STOP_LINE"
+        if phase.startswith(("RECHECK", "VERIFY", "MARKER", "TURN")):   # "RECHECK 2/3", "VERIFY STOP_LINE"
             self.send(format_dev("DRIVE", *phase.split()))
         else:
             self.send(format_dev("DRIVE", "RUNNING"))
@@ -218,6 +226,12 @@ class BtBridgeNode(Node):
 
     def on_stop_line(self, msg):
         self._stop_line = (bool(msg.detected), bool(msg.confirmed), time.monotonic())
+
+    def on_marker_state(self, msg):
+        now = time.monotonic()
+        if "MARKER" in self.core.watches and now - self._last_marker_sent >= WATCH_PERIOD_S:
+            self._last_marker_sent = now
+            self.send(format_dev("MARKER", *(f"{c}:{s}:{y:.0f}" for c, s, y in zip(msg.colors, msg.sides, msg.y))))
 
     def on_image(self, msg: Image):
         self.streamer.update(msg.encoding, msg.height, msg.width, msg.step, msg.data)
