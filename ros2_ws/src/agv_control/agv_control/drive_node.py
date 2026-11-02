@@ -154,6 +154,7 @@ class DriveNode(Node):
                 if self.out is not None:
                     feedback.linear, feedback.angular = float(self.out.linear), float(self.out.angular)
                 feedback.offset = self.offset
+                feedback.phase = self.ctrl.phase
             goal_handle.publish_feedback(feedback)
         result = self.result
         ok = not result.startswith("E_") and (result != "STOPPED" or command == DriveCommand.STOP.value)

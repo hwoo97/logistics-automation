@@ -59,6 +59,7 @@ class BtBridgeNode(Node):
         except ImportError:
             self.get_logger().warn("agv_interfaces 없음 — DEV LINE 보내지 않음")
         self.drive_client, self._drive_goal = None, None    # 노트북 앱 "라인 주행 시작/정지" → /drive 액션
+        self._drive_phase = "FOLLOW"
         try:
             from rclpy.action import ActionClient
             from agv_interfaces.action import Drive
@@ -127,8 +128,21 @@ class BtBridgeNode(Node):
             self.send(format_dev("DRIVE", "REJECTED", "drive_node 없음"))
             return
         self.core.set_driving(True)                             # 응답 전에도 겹치는 명령을 막음
-        future = self.drive_client.send_goal_async(self.Drive.Goal(command="FOLLOW_TO_EVENT"))
+        self._drive_phase = "FOLLOW"
+        future = self.drive_client.send_goal_async(self.Drive.Goal(command="FOLLOW_TO_EVENT"),
+                                                   feedback_callback=self._on_drive_feedback)
         future.add_done_callback(self._on_drive_accepted)
+
+    def _on_drive_feedback(self, msg):
+        """단계가 바뀔 때만 앱에 알림 — 라인 끝 재확인 중(RECHECK 2/3) 또는 다시 출발(RUNNING)."""
+        phase = msg.feedback.phase
+        if phase == self._drive_phase:
+            return
+        self._drive_phase = phase
+        if phase.startswith("RECHECK"):
+            self.send(format_dev("DRIVE", "RECHECK", phase.split()[-1]))
+        else:
+            self.send(format_dev("DRIVE", "RUNNING"))
 
     def _on_drive_accepted(self, future):
         handle = future.result()

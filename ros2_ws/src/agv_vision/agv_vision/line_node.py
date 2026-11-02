@@ -18,7 +18,9 @@ class LineNode(Node):
         d = LineConfig()
         cfg = LineConfig(
             roi_ratio=p("roi_ratio", d.roi_ratio).value,
-            black_v_range=tuple(p("black_v_range", list(d.black_v_range)).value),
+            black_ratio=p("black_ratio", d.black_ratio).value,
+            black_v_max=p("black_v_max", d.black_v_max).value,
+            black_blur=p("black_blur", d.black_blur).value,
             black_s_max=p("black_s_max", d.black_s_max).value,
             min_pixels=p("min_pixels", d.min_pixels).value,
             column_fill=p("column_fill", d.column_fill).value,

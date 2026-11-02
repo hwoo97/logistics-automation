@@ -15,7 +15,7 @@
   (가중치는 라인 고르기에만 — 코너 라인은 화면 끝까지 뻗어야 하므로 이벤트는 "이어져 있는지"로 거른다)
   갈림길(분기점)은 판정하지 않는다 → 색 마커 인식이 맡음 (2026-10-30 결정). T자·옆 갈래 모양은 NONE,
   마커를 놓쳐 T자에서 라인이 끊기면 LINE_END로 멈춘다.
-검정 = 어둡고(V가 Otsu 문턱 이하) + 색이 없음(S가 낮음) → 빨강·파랑 마커가 라인으로 잡히지 않게.
+검정 = 줄의 바닥 밝기보다 충분히 어둡고 + 색이 없음(S가 낮음) → 반사·그림자에 강하고, 빨강·파랑 마커는 라인으로 잡히지 않음.
 같은 이벤트가 confirm_frames번 연속일 때만 확정(EventConfirmer).
 """
 from dataclasses import dataclass
@@ -31,7 +31,9 @@ class LineConfig:
     width: int = 320
     height: int = 240
     roi_ratio: float = 0.33             # 아래쪽 몇 %를 볼지
-    black_v_range: tuple = (40, 110)    # Otsu 문턱을 이 범위로 제한 (조명 변화·라인 없는 화면 대비)
+    black_ratio: float = 0.72           # 줄의 바닥 밝기(상위 10%)의 이 비율 이하 = 어두움 (실측: 라인 0.65, 회색 무늬 0.85 이상)
+    black_v_max: int = 170              # 이보다 밝으면 대비와 상관없이 라인 아님
+    black_blur: int = 5                 # 밝기 중앙값 필터 크기 (홀수)
     black_s_max: int = 90               # 채도가 이보다 크면 색 마커 → 라인 아님
     min_pixels: int = 60                # 가까운 띠에 이보다 적으면 라인 없음
     column_fill: float = 0.4            # 띠 높이의 몇 % 이상 검으면 그 열을 "검은 열"로 봄
@@ -77,13 +79,13 @@ class EventConfirmer:
 
 
 def black_mask(bgr: np.ndarray, cfg: LineConfig) -> np.ndarray:
-    """어둡고 색이 없는 픽셀 = 255."""
+    """바닥보다 충분히 어둡고 색이 없는 픽셀 = 255. 기준 = 줄마다 상위 10% 밝기(바닥) × black_ratio.
+    고정 문턱이면 광택 테이프가 반사로 밝아질 때 라인을 잃음 (2026-11-02 실제 사진: 라인 V 약 124, 바닥 약 190)."""
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-    s, v = hsv[..., 1], hsv[..., 2]
-    otsu, _ = cv2.threshold(v, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    lo, hi = cfg.black_v_range
-    thr = min(max(otsu, lo), hi)
-    mask = ((v <= thr) & (s <= cfg.black_s_max)).astype(np.uint8) * 255
+    s = hsv[..., 1]
+    v = cv2.medianBlur(hsv[..., 2], cfg.black_blur)             # 테라조 바닥 무늬·테이프 반사 얼룩 완화
+    floor = np.percentile(v, 90, axis=1, keepdims=True)
+    mask = ((v <= cfg.black_ratio * floor) & (v <= cfg.black_v_max) & (s <= cfg.black_s_max)).astype(np.uint8) * 255
     return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
 
@@ -112,6 +114,7 @@ class LineDetector:
         self.confirm = EventConfirmer(self.cfg.confirm_frames, {LineEvent.LINE_END: self.cfg.line_end_frames})
         self.offset = 0.0
         self.line_px = float(self.cfg.default_line_px)     # 직전 라인 굵기 (정지선 폭 기준)
+        self.lost_frames = 0                               # 가까운 띠에서 라인을 연속으로 놓친 프레임 수
 
     def set_frames(self, key: str, frames: int) -> None:
         """노트북 앱 조정 (DEV TUNE) — CONFIRM: 정지선·코너 확정 프레임, LINE_END: 라인 끝 확정 프레임."""
@@ -139,25 +142,35 @@ class LineDetector:
         if centered is None:                                  # 가까운 띠가 전부 두꺼움 (물체에 덮임)
             return self._lost(mask)
         self.offset, self.line_px = centered
+        self.lost_frames = 0
         raw = self.detect_event(line, self.line_px)
         angle = self.line_angle(line)
         return LineResult(round(self.offset, 3), True, self.confirm.push(raw), raw,
                           round(angle, 1) if angle is not None else 90.0, angle is not None)
 
     def _lost(self, mask: np.ndarray) -> LineResult:
-        """가까운 띠에서 라인을 못 찾음. 위쪽(중간·먼 띠)에 라인 모양이 보이면 잠깐 놓친 것(NONE),
-        관심 영역 어디에도 없으면 라인 끝(LINE_END, line_end_frames 연속이어야 확정). 오프셋은 마지막 값 유지."""
-        raw = LineEvent.NONE if self._line_above(mask) else LineEvent.LINE_END
+        """가까운 띠에서 라인을 못 찾음. 직전 라인 위치 근처 위쪽(중간·먼 띠)에 라인 모양이 보이면 잠깐 놓친 것(NONE),
+        아니면 라인 끝(LINE_END, line_end_frames 연속이어야 확정). 오프셋은 마지막 값 유지.
+        놓친 상태가 line_end_frames × 2를 넘으면 위쪽에 무엇이 보여도 라인 끝 — 멈추지 않고 계속 달리는 것을 막음."""
+        self.lost_frames += 1
+        keep_going = self.lost_frames < 2 * self.cfg.line_end_frames and self._line_above(mask)
+        raw = LineEvent.NONE if keep_going else LineEvent.LINE_END
         return LineResult(round(self.offset, 3), False, self.confirm.push(raw), raw)
 
     def _line_above(self, mask: np.ndarray) -> bool:
-        """중간·먼 띠에 가는 세로 구간(폭 ≤ max_line_px)이 angle_min_rows/2 줄 이상 이어진 덩어리가 있는지."""
+        """중간·먼 띠의 직전 라인 위치 근처(±2 × max_line_px)에 가는 구간이 angle_min_rows/2 줄 이상 이어진 덩어리가 있는지."""
         c = self.cfg
+        prev_x = (self.offset + 1) * c.width / 2
+        reach = 2 * c.max_line_px
         upper = mask[: 2 * mask.shape[0] // 3]
         n, labels = cv2.connectedComponents(upper, connectivity=8)
         for i in range(1, n):
             comp = labels == i
-            rows = sum(1 for y in range(comp.shape[0]) if self._thin_runs(comp[y], c.width / 2))
+            rows = 0
+            for y in range(comp.shape[0]):
+                runs = self._thin_runs(comp[y], prev_x)
+                if runs and abs((runs[0][0] + runs[0][1]) / 2 - prev_x) <= reach:
+                    rows += 1
             if rows >= max(3, c.angle_min_rows // 2):
                 return True
         return False

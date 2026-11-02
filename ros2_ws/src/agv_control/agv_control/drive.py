@@ -31,6 +31,9 @@ class DriveConfig:
     heading_deadband_deg: float = 5.0   # 90°에서 이 안쪽(85~95°)은 각도 보정 안 함
     max_angular: float = 0.6
     line_timeout_s: float = 0.5     # 라인 상태가 이 시간 동안 안 오면 정지 (E_LINE)
+    recheck_tries: int = 3          # LINE_END 후 정지한 채 라인을 다시 보는 횟수 (0이면 바로 끝)
+    recheck_s: float = 0.5          # 한 번 보는 시간
+    recheck_frames: int = 3         # 라인이 이만큼 연속 보이면 자동으로 다시 출발
 
 
 @dataclass
@@ -88,11 +91,21 @@ class DriveController:
         self.command: DriveCommand | None = None
         self.since_line = 0.0               # 마지막 라인 상태 이후 시간
         self.last = DriveOutput(0.0, 0.0)   # 새 라인 상태가 없는 주기에는 직전 출력 유지
+        self.recheck_t = None               # LINE_END 재확인 경과 시간 (None = 재확인 중 아님)
+        self.recheck_seen = 0               # 재확인 중 라인이 연속으로 보인 프레임 수
         self._floor = (self.cfg.min_speed, self.cfg.event_speed)   # set_speed가 낮췄다 올릴 때 되돌릴 값
 
     @property
     def active(self) -> bool:
         return self.command is not None
+
+    @property
+    def phase(self) -> str:
+        """지금 단계 — 앱 표시용. "FOLLOW" 또는 "RECHECK 2/3"."""
+        if self.recheck_t is None:
+            return "FOLLOW"
+        c = self.cfg
+        return f"RECHECK {min(c.recheck_tries, int(self.recheck_t / c.recheck_s) + 1)}/{c.recheck_tries}"
 
     def set_speed(self, speed: float) -> None:
         """주행 기본 속도 변경 (노트북 앱, 주행 중에도). 감속 하한·이벤트 감속이 기본 속도보다 크지 않게 맞춘다."""
@@ -114,9 +127,11 @@ class DriveController:
         self.pid.reset()
         self.since_line = 0.0
         self.last = DriveOutput(0.0, 0.0)
+        self.recheck_t = None
 
     def cancel(self) -> DriveOutput:
         self.command = None
+        self.recheck_t = None
         return DriveOutput(0.0, 0.0, True, "STOPPED")
 
     def step(self, line: LineInput | None, dt: float) -> DriveOutput:
@@ -132,8 +147,15 @@ class DriveController:
         self.since_line = 0.0 if line is not None else self.since_line + dt
         if self.since_line > self.cfg.line_timeout_s:
             self.command = None
+            self.recheck_t = None
             return DriveOutput(0.0, 0.0, True, "E_LINE")
+        if self.recheck_t is not None:
+            return self._step_recheck(line, dt)
         if line is None:                       # 이번 주기엔 새 영상 없음 → 직전 출력 유지
+            return self.last
+        if line.event == LineEvent.LINE_END and self.cfg.recheck_tries > 0:
+            self.recheck_t, self.recheck_seen = 0.0, 0     # 멈춰서 다시 봄 — 주행 중 흔들림으로 놓쳤을 수 있음
+            self.last = DriveOutput(0.0, 0.0)
             return self.last
         if line.event in STOP_EVENTS:
             self.command = None
@@ -147,4 +169,20 @@ class DriveController:
         if line.raw_event != LineEvent.NONE or not line.line_found:
             linear = min(linear, c.event_speed)          # 이벤트가 보이기 시작하면 감속
         self.last = DriveOutput(round(linear, 3), round(angular, 3))
+        return self.last
+
+    def _step_recheck(self, line: LineInput | None, dt: float) -> DriveOutput:
+        """LINE_END 후 정지한 채 라인을 다시 본다. recheck_frames 연속 보이면 재출발, 모든 횟수가 지나면 진짜 라인 끝."""
+        c = self.cfg
+        self.recheck_t += dt
+        if line is not None:
+            self.recheck_seen = self.recheck_seen + 1 if line.line_found else 0
+            if self.recheck_seen >= c.recheck_frames:
+                self.recheck_t = None
+                self.pid.reset()                           # 멈춰 있던 동안의 변화율이 조향에 튀지 않게
+                return self.last
+        if self.recheck_t >= c.recheck_tries * c.recheck_s:
+            self.recheck_t = None
+            self.command = None
+            return DriveOutput(0.0, 0.0, True, LineEvent.LINE_END.value)
         return self.last

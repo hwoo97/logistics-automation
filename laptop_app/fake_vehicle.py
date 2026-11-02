@@ -236,7 +236,9 @@ class FakeVehicle:
             self._advance(now)
             if self.drive_end is not None and now >= self.drive_end:
                 self.drive_end = None
-                self.send(format_dev("DRIVE", "DONE", "STOP_LINE"))
+                for n in (1, 2, 3):                       # 라인 끝 재확인 흉내
+                    self.send(format_dev("DRIVE", "RECHECK", f"{n}/3"))
+                self.send(format_dev("DRIVE", "DONE", "LINE_END"))
             if self.state == "MANUAL":
                 self.offset = max(-1.0, min(1.0, self.offset * 0.97 - self.move[1] * 0.05))
             elif self.state not in ("ESTOP", "IDLE", "PARKED"):

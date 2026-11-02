@@ -54,7 +54,71 @@ def test_slows_when_event_appears():
     assert out.linear == pytest.approx(DriveConfig().event_speed)
 
 
-@pytest.mark.parametrize("event", [LineEvent.STOP_LINE, LineEvent.CORNER_LEFT, LineEvent.CORNER_RIGHT, LineEvent.LINE_END])
+LOST = LineInput(0.0, False, LineEvent.LINE_END, LineEvent.LINE_END)
+FOUND = LineInput(0.1, True)
+
+
+def test_line_end_stops_and_rechecks_then_finishes():
+    """라인 끝 → 정지 후 3번(1.5초) 다시 봄 → 계속 없으면 진짜 라인 끝으로 끝남."""
+    d = follow()
+    first = d.step(LOST, DT)
+    assert not first.done and (first.linear, first.angular) == (0, 0) and d.phase == "RECHECK 1/3"
+    outs, phases = [], set()
+    for _ in range(60):
+        out = d.step(LOST, DT)
+        outs.append(out)
+        if out.done:
+            break
+        phases.add(d.phase)
+    assert outs[-1].done and outs[-1].result == "LINE_END" and not d.active
+    assert all(o.linear == 0 for o in outs)                  # 재확인 중엔 정지
+    assert phases == {"RECHECK 1/3", "RECHECK 2/3", "RECHECK 3/3"}
+    assert len(outs) == pytest.approx(30, abs=1)             # 3 × 0.5초 ÷ 0.05초
+
+
+def test_line_end_resumes_when_line_seen_again():
+    """주행 중 잠깐 놓쳐 라인 끝이 됐어도 멈춘 뒤 3프레임 연속 보이면 자동 재출발 (2026-11-02 S1: 앱에서 다시 누르면 달리던 경우)."""
+    d = follow()
+    d.step(LOST, DT)
+    assert d.step(FOUND, DT).linear == 0 and d.step(FOUND, DT).linear == 0
+    d.step(FOUND, DT)                                        # 3프레임째 — 재확인 끝
+    assert d.phase == "FOLLOW" and d.active
+    out = d.step(FOUND, DT)
+    assert out.linear > 0 and not out.done
+
+
+def test_recheck_needs_consecutive_frames():
+    d = follow()
+    d.step(LOST, DT)
+    for line in (FOUND, FOUND, LOST, FOUND, FOUND):          # 중간에 끊기면 처음부터
+        d.step(line, DT)
+    assert d.phase.startswith("RECHECK")
+
+
+def test_recheck_zero_finishes_immediately():
+    c = DriveConfig(recheck_tries=0)
+    d = DriveController(c)
+    d.start(DriveCommand.FOLLOW_TO_EVENT)
+    out = d.step(LOST, DT)
+    assert out.done and out.result == "LINE_END"
+
+
+def test_recheck_stops_if_line_state_stops_arriving():
+    d = follow()
+    d.step(LOST, DT)
+    out = None
+    for _ in range(11):
+        out = d.step(None, DT)
+    assert out.done and out.result == "E_LINE"
+
+
+def test_cancel_during_recheck():
+    d = follow()
+    d.step(LOST, DT)
+    assert d.cancel().result == "STOPPED" and not d.active and d.phase == "FOLLOW"
+
+
+@pytest.mark.parametrize("event", [LineEvent.STOP_LINE, LineEvent.CORNER_LEFT, LineEvent.CORNER_RIGHT])
 def test_stops_on_confirmed_event(event):
     d = follow()
     out = d.step(LineInput(0.0, True, event, event), DT)

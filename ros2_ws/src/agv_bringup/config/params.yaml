@@ -46,7 +46,9 @@ line_node:
   ros__parameters:
     enabled: true
     roi_ratio: 0.33             # 아래쪽 1/3 — 띠 3개(먼·중간·가까운)로 나눔
-    black_v_range: [40, 110]    # 검정 밝기 문턱(Otsu)을 이 범위로 제한
+    black_ratio: 0.72           # 줄의 바닥 밝기(상위 10%)의 이 비율 이하 = 어두움 — 라인을 잃으면 ↑, 바닥 무늬가 잡히면 ↓
+    black_v_max: 170            # 이보다 밝으면 라인 아님
+    black_blur: 5               # 밝기 중앙값 필터 (홀수)
     black_s_max: 90             # 채도가 이보다 크면 색 마커 → 라인 아님
     min_pixels: 60
     column_fill: 0.4
@@ -79,6 +81,9 @@ drive_node:
     center_offset: -0.10        # 라인 기준 위치 — 카메라가 차체 중심에서 왼쪽에 달려 화면 가운데에서 10% 왼쪽 (2026-10-30 S1)
     max_angular: 0.6
     line_timeout_s: 0.5         # 라인 상태가 끊기면 정지 (E_LINE)
+    recheck_tries: 3            # LINE_END 후 정지해서 라인을 다시 보는 횟수 (0이면 바로 끝)
+    recheck_s: 0.5              # 한 번 보는 시간
+    recheck_frames: 3           # 이만큼 연속 보이면 자동으로 다시 출발
 
 bt_bridge_node:
   ros__parameters:

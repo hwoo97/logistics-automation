@@ -127,6 +127,8 @@ def test_dev_replies():
     r = parse_reply(format_dev("DRIVE", "DONE", "STOP_LINE"))
     assert (r["kind"], r["state"], r["result"]) == ("DRIVE", "DONE", "STOP_LINE")
     assert parse_reply("DEV DRIVE RUNNING")["result"] == ""
+    r = parse_reply(format_dev("DRIVE", "RECHECK", "2/3"))
+    assert (r["state"], r["result"]) == ("RECHECK", "2/3")
     r = parse_reply(format_dev("LINE", -0.12, "NONE"))
     assert (r["offset"], r["event"]) == (pytest.approx(-0.12), "NONE")
     r = parse_reply(format_dev("SYS", 52.1, 37.0, 41.0))

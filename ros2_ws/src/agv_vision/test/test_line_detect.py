@@ -151,6 +151,31 @@ def test_one_sided_mark_is_not_stop_line():
     assert run(img).raw_event == LineEvent.NONE
 
 
+def terrazzo():
+    """무늬 바닥 — 밝은 바탕(V 약 190)에 회색 조각(V 약 165) (2026-11-02 실제 바닥)."""
+    rng = np.random.default_rng(1)
+    img = np.full((H, W, 3), 190, np.uint8)
+    for _ in range(250):
+        x, y = int(rng.integers(0, W)), int(rng.integers(0, H))
+        img[y:y + int(rng.integers(3, 9)), x:x + int(rng.integers(3, 12))] = 165
+    return img
+
+
+@pytest.mark.parametrize("v", [40, 90, 124, 135])
+def test_glossy_line_on_patterned_floor(v):
+    """반사로 밝아진 라인(V 124 실측)도 무늬 바닥에서 찾음 — 고정 문턱 110이면 LINE_END로 멈췄음."""
+    img = terrazzo()
+    img[:, 150:170] = v
+    r = run(img, frames=12)
+    assert r.line_found and abs(r.offset) < 0.05 and r.event == LineEvent.NONE
+
+
+def test_patterned_floor_alone_is_line_end():
+    """회색 무늬만 있으면 라인 아님."""
+    r = run(terrazzo(), frames=12)
+    assert not r.line_found and r.event == LineEvent.LINE_END
+
+
 def test_line_end():
     r = run(floor(), frames=LineConfig().line_end_frames)
     assert not r.line_found and r.event == LineEvent.LINE_END
@@ -189,6 +214,24 @@ def test_line_visible_above_is_not_line_end():
     vline(img, 200, 0, 205)                       # 가까운 띠(213~)엔 없음
     r = run(img, frames=12)
     assert not r.line_found and r.raw_event == LineEvent.NONE and r.event == LineEvent.NONE
+
+
+def test_dark_thing_far_from_line_is_not_line_above():
+    """직전 라인 위치에서 먼 어두운 물체(화면 가장자리)는 "위쪽 라인"이 아님 — 진짜 라인 끝에서 멈춰야 함 (2026-11-02 실제 사진)."""
+    img = floor()
+    img[160:205, 0:14] = 40
+    r = run(img, frames=LineConfig().line_end_frames)
+    assert r.raw_event == LineEvent.LINE_END and r.event == LineEvent.LINE_END
+
+
+def test_stops_even_if_something_stays_above():
+    """가까운 띠에 라인이 계속 없으면 위쪽에 라인 모양이 있어도 결국 라인 끝 — 멈추지 않고 달리는 것 방지."""
+    img = floor()
+    vline(img, 160, 0, 205)
+    det = LineDetector(LineConfig())
+    n = LineConfig().line_end_frames
+    events = [det.process(img).event for _ in range(3 * n)]
+    assert events[n] == LineEvent.NONE and events[-1] == LineEvent.LINE_END
 
 
 def test_colored_markers_are_not_line():
