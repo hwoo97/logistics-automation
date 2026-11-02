@@ -100,6 +100,15 @@ def test_drive_follow_and_stop(core):
     assert ("drive", "STOP") in io.calls
 
 
+def test_drive_uturn(core):
+    c, io = core
+    c.on_line("DEV DRIVE UTURN")
+    assert ("drive", "UTURN") in io.calls
+    c.set_driving(True)
+    c.on_line("DEV DRIVE UTURN")                                            # 동작 중 겹치는 명령 거부
+    assert "라인 주행 중" in io.replies("NAK")[-1]["reason"]
+
+
 def test_drive_follow_rejected_outside_idle(core):
     c, io = core
     c.on_line("MANUAL ON")

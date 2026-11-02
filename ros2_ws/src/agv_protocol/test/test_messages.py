@@ -26,6 +26,7 @@ from agv_protocol.types import Cargo, State, Target
     ("DEV TUNE LINE_END 10", "DEV", ["TUNE", "LINE_END", "10"]),
     ("DEV TUNE FORWARD 0.4", "DEV", ["TUNE", "FORWARD", "0.4"]),
     ("DEV TUNE SPIN 0.6", "DEV", ["TUNE", "SPIN", "0.6"]),
+    ("DEV drive uturn", "DEV", ["DRIVE", "UTURN"]),
     ("DEV target red", "DEV", ["TARGET", "RED"]),
     ("DEV TARGET NONE", "DEV", ["TARGET", "NONE"]),
     ("DEV WATCH MARKER ON", "DEV", ["WATCH", "MARKER", "ON"]),
@@ -153,3 +154,9 @@ def test_dev_marker_reply():
     assert parse_reply(format_dev("MARKER", "red:left:150", "blue:right:90"))["markers"] == [
         ("red", "left", 150.0), ("blue", "right", 90.0)]
     assert parse_reply(format_dev("MARKER"))["markers"] == []
+
+
+def test_uturn_only_starts_in_idle():
+    assert check_allowed(parse_command("DEV DRIVE UTURN"), "IDLE") is None
+    assert check_allowed(parse_command("DEV DRIVE UTURN"), "ESTOP")
+    assert check_allowed(parse_command("DEV DRIVE STOP"), "ESTOP") is None

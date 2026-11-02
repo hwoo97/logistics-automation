@@ -49,6 +49,7 @@ class FakeVehicle:
         self.offset = 0.0
         self.drive_speed = 0.6                     # DEV SPEED (drive_node 기본 속도 흉내)
         self.drive_end = None                      # DEV DRIVE FOLLOW — 이 시각에 정지선 도착 흉내
+        self.drive_uturn_end = None                # DEV DRIVE UTURN — 이 시각에 유턴 완료 흉내
 
     # ── 로그·전송 ─────────────────────────────────────────
 
@@ -162,6 +163,9 @@ class FakeVehicle:
             if rest[0] == "FOLLOW":
                 self.drive_end = now + 6.0 / self.drive_speed      # 빠를수록 일찍 도착
                 self.send(format_dev("DRIVE", "RUNNING"))
+            elif rest[0] == "UTURN":
+                self.drive_uturn_end = now + 3.0
+                self.send(format_dev("DRIVE", "UTURN"))
             elif self.drive_end is not None:
                 self.drive_end = None
                 self.send(format_dev("DRIVE", "DONE", "STOPPED"))
@@ -241,6 +245,9 @@ class FakeVehicle:
                 for n in (1, 2, 3):                       # 라인 끝 재확인 흉내
                     self.send(format_dev("DRIVE", "RECHECK", f"{n}/3"))
                 self.send(format_dev("DRIVE", "DONE", "LINE_END"))
+            if self.drive_uturn_end is not None and now >= self.drive_uturn_end:
+                self.drive_uturn_end = None
+                self.send(format_dev("DRIVE", "DONE", "UTURN_DONE"))
             if self.state == "MANUAL":
                 self.offset = max(-1.0, min(1.0, self.offset * 0.97 - self.move[1] * 0.05))
             elif self.state not in ("ESTOP", "IDLE", "PARKED"):

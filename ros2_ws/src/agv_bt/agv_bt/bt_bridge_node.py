@@ -123,7 +123,7 @@ class BtBridgeNode(Node):
         self.pub_target.publish(String(data="NONE" if color == "NONE" else color.lower()))
 
     def drive(self, action):
-        """DEV DRIVE FOLLOW|STOP — drive_node에 FOLLOW_TO_EVENT 목표를 보내거나 취소. 결과는 DEV DRIVE로 알림."""
+        """DEV DRIVE FOLLOW|UTURN|STOP — drive_node에 FOLLOW_TO_EVENT·UTURN 목표를 보내거나 취소. 결과는 DEV DRIVE로 알림."""
         if self.drive_client is None:
             self.send(format_dev("DRIVE", "REJECTED", "agv_interfaces 없음"))
             return
@@ -137,8 +137,9 @@ class BtBridgeNode(Node):
             self.send(format_dev("DRIVE", "REJECTED", "drive_node 없음"))
             return
         self.core.set_driving(True)                             # 응답 전에도 겹치는 명령을 막음
-        self._drive_phase = "FOLLOW"
-        future = self.drive_client.send_goal_async(self.Drive.Goal(command="FOLLOW_TO_EVENT"),
+        self._drive_phase = "UTURN" if action == "UTURN" else "FOLLOW"
+        command = "UTURN" if action == "UTURN" else "FOLLOW_TO_EVENT"
+        future = self.drive_client.send_goal_async(self.Drive.Goal(command=command),
                                                    feedback_callback=self._on_drive_feedback)
         future.add_done_callback(self._on_drive_accepted)
 
@@ -161,7 +162,7 @@ class BtBridgeNode(Node):
             self.send(format_dev("DRIVE", "REJECTED", "drive_node 거부 (비상 정지 중?)"))
             return
         self._drive_goal = handle
-        self.send(format_dev("DRIVE", "RUNNING"))
+        self.send(format_dev("DRIVE", "UTURN" if self._drive_phase == "UTURN" else "RUNNING"))
         handle.get_result_async().add_done_callback(self._on_drive_result)
 
     def _on_drive_result(self, future):

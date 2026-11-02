@@ -240,9 +240,9 @@ def test_stop_and_cancel():
 
 def test_unsupported_command_fails_safely():
     d = DriveController()
-    d.start(DriveCommand.UTURN)
+    d.start(DriveCommand.APPROACH)
     out = d.step(LineInput(0.0, True), DT)
-    assert out.done and out.result == "E_UNSUPPORTED_UTURN" and out.linear == 0
+    assert out.done and out.result == "E_UNSUPPORTED_APPROACH" and out.linear == 0
 
 
 def test_set_speed_applies_while_driving():
@@ -602,3 +602,88 @@ def test_tune_forward_and_spin():
     d = marker_drive()
     d.set_tune("FORWARD", 0.8), d.set_tune("SPIN", 0.5)
     assert d.cfg.turn_forward_s == 0.8 and d.cfg.turn_speed == 0.5
+
+
+# ── 유턴 ─────────────────────────────────────────────────
+
+def uturn(**cfg):
+    d = DriveController(DriveConfig(**cfg))
+    d.start(DriveCommand.UTURN)
+    return d
+
+
+def test_uturn_spins_left_in_place_without_forward():
+    d = uturn()
+    out = d.step(AHEAD, DT)
+    assert out.linear == 0 and out.angular == pytest.approx(DriveConfig().turn_speed) and d.phase == "UTURN"
+
+
+def test_uturn_follows_spin_tune():
+    d = uturn()
+    d.set_tune("SPIN", 0.4)
+    assert d.step(AHEAD, DT).angular == pytest.approx(0.4)
+
+
+def test_uturn_does_not_end_on_old_line():
+    d = uturn()
+    for _ in range(100):
+        assert not d.step(AHEAD, DT).done
+    assert d.phase == "UTURN"
+
+
+def test_uturn_ignores_line_seen_too_early():
+    """시작 직후 잠깐 보이는 정지선·옆 라인에서는 끝나지 않음."""
+    d = uturn()
+    for _ in range(3):
+        d.step(GONE, DT)
+    for _ in range(int(DriveConfig().uturn_min_s / DT) - 8):
+        assert not d.step(AHEAD, DT).done
+
+
+def test_uturn_ends_when_line_found_again():
+    d = uturn()
+    for _ in range(int(DriveConfig().uturn_min_s / DT) + 1):
+        d.step(GONE, DT)
+    d.step(AHEAD, DT), d.step(AHEAD, DT)
+    out = d.step(AHEAD, DT)
+    assert out.done and out.result == "UTURN_DONE" and out.linear == 0 and out.angular == 0
+    assert not d.active and d.phase == "FOLLOW"
+
+
+def test_uturn_t_bar_is_not_the_line():
+    d = uturn()
+    for _ in range(int(DriveConfig().uturn_min_s / DT) + 20):
+        assert not d.step(BAR, DT).done
+
+
+def test_uturn_timeout_is_e_turn():
+    d = uturn()
+    out = None
+    for _ in range(int(DriveConfig().uturn_timeout_s / DT) + 1):
+        out = d.step(GONE, DT)
+        if out.done:
+            break
+    assert out.done and out.result == "E_TURN" and out.angular == 0 and not d.active
+
+
+def test_uturn_ignores_line_events_and_markers():
+    d = uturn()
+    d.set_target("red")
+    stop = LineInput(0.0, True, LineEvent.STOP_LINE, LineEvent.STOP_LINE)
+    assert not d.step(stop, DT, see("left", y=200.0)).done and d.phase == "UTURN"
+
+
+def test_uturn_cancel_stops():
+    d = uturn()
+    out = d.cancel()
+    assert out.done and out.result == "STOPPED" and out.angular == 0 and d.phase == "FOLLOW"
+
+
+def test_uturn_line_timeout():
+    d = uturn()
+    out = None
+    for _ in range(int(DriveConfig().line_timeout_s / DT) + 2):
+        out = d.step(None, DT)
+        if out.done:
+            break
+    assert out.done and out.result == "E_LINE"

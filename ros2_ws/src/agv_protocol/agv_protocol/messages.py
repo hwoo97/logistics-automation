@@ -30,7 +30,7 @@ ALLOWED_STATES = {
     "DEV SERVO": _HW_STATES,
     "DEV WHEEL": frozenset({"IDLE", "MANUAL"}),
     "DEV SPEED": ALL_STATES,              # 주행 중에도 속도 조절
-    "DEV DRIVE": ALL_STATES,              # STOP은 언제나, FOLLOW는 IDLE에서만 (check_allowed)
+    "DEV DRIVE": ALL_STATES,              # STOP은 언제나, FOLLOW·UTURN은 IDLE에서만 (check_allowed)
     "DEV TUNE": ALL_STATES,               # 주행 중에도 조정
     "DEV TARGET": ALL_STATES,             # 시험용 목적지 색 — 주행 중에도
     "DEV WATCH": ALL_STATES,
@@ -40,7 +40,7 @@ ALLOWED_STATES = {
 WATCH_KEYS = ("RANGE", "LINE", "MARKER", "SYS")
 TARGET_COLORS = ("RED", "GREEN", "BLUE", "YELLOW", "NONE")   # DEV TARGET — NONE이면 마커를 보지 않고 라인만 따라감
 SPEED_RANGE = (0.2, 1.0)        # DEV SPEED — drive_node 기본 선속도
-DRIVE_ACTIONS = ("FOLLOW", "STOP")      # DEV DRIVE — 시험용 라인 주행 시작·정지
+DRIVE_ACTIONS = ("FOLLOW", "UTURN", "STOP")      # DEV DRIVE — 시험용 라인 주행 시작, 유턴, 정지
 TUNE_RANGES = {"TURN": (0.1, 1.5),      # DEV TUNE — 회전 세기 (회전량 전체에 곱함)            → drive_node
                "CENTER": (-0.5, 0.5),   #            라인 기준 위치 (오프셋 목표, 음수 = 화면 왼쪽) → drive_node
                "FORWARD": (0.0, 2.0),   #            마커 회전 전 전진 시간(초)                 → drive_node
@@ -173,8 +173,8 @@ def command_key(line: str) -> str:
 def check_allowed(cmd: Command, state: str) -> str | None:
     """현재 상태에서 받을 수 있으면 None, 아니면 NAK 이유."""
     allowed = ALLOWED_STATES.get(cmd.key, frozenset())
-    if cmd.key == "DEV DRIVE" and cmd.args[1:] == ["FOLLOW"] and state != "IDLE":
-        return f"{state} 상태에서 불가 (라인 주행 시작은 IDLE에서만)"
+    if cmd.key == "DEV DRIVE" and cmd.args[1:] != ["STOP"] and state != "IDLE":
+        return f"{state} 상태에서 불가 (라인 주행·유턴 시작은 IDLE에서만)"
     if state in allowed:
         return None
     return f"{state} 상태에서 불가"
@@ -262,7 +262,7 @@ def parse_reply(line: str) -> dict:
             if kind == "SYS":
                 return {"type": "DEV", "kind": kind, "temp": float(rest[1]),
                         "cpu": float(rest[2]), "mem": float(rest[3])}
-            if kind == "DRIVE":                 # DEV DRIVE <RUNNING|RECHECK|VERIFY|MARKER|TURN|DONE|REJECTED> [<결과·이유·2/3·이벤트·색·방향>]
+            if kind == "DRIVE":                 # DEV DRIVE <RUNNING|RECHECK|VERIFY|MARKER|TURN|UTURN|DONE|REJECTED> [<결과·이유·2/3·이벤트·색·방향>]
                 return {"type": "DEV", "kind": kind, "state": rest[1], "result": " ".join(rest[2:])}
             if kind == "NODES":
                 return {"type": "DEV", "kind": kind, "nodes": rest[1].split(",") if len(rest) > 1 else []}

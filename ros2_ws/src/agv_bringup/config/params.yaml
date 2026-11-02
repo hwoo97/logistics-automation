@@ -121,6 +121,9 @@ drive_node:
     turn_seen_frames: 3         # 새 라인이 이만큼 연속 보이면 회전 끝
     turn_timeout_s: 4.0         # 이 시간 안에 못 찾으면 정지·E_LINE — 실제 회전 속도를 보고 90°보다 조금 더 도는 시간으로 줄임
     turn_settle_s: 1.0          # 회전 후 이 시간은 정지선·코너·라인 끝을 무시 (분기점 가로선 재검출 방지)
+    # 유턴 — 앱 "제자리 회전" 세기를 함께 씀
+    uturn_min_s: 1.5            # 시작 후 이 시간은 새 라인으로 인정 안 함 — 실제 회전 속도에 맞춰 90°보다 조금 더 도는 시간으로
+    uturn_timeout_s: 8.0        # 이 시간 안에 라인을 못 찾으면 정지·E_TURN
 
 bt_bridge_node:
   ros__parameters:

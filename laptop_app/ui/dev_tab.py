@@ -201,6 +201,8 @@ class DevTab(ttk.Frame):
                   command=self._start_drive).pack(side="left")
         tk.Button(run, text="■ 정지", bg="#616161", fg="white", font=("맑은 고딕", 10, "bold"), width=8,
                   command=lambda: self.send("DEV", "DRIVE", "STOP")).pack(side="left", padx=4)
+        tk.Button(run, text="↩ U턴", bg="#1565c0", fg="white", font=("맑은 고딕", 10, "bold"), width=8,
+                  command=self._start_uturn).pack(side="left")
         self.drive_lbl = ttk.Label(run, text="대기", width=18)
         self.drive_lbl.pack(side="left", padx=4)
         self.speed = tk.DoubleVar(value=self.tuning["speed"])
@@ -273,6 +275,13 @@ class DevTab(ttk.Frame):
             return
         self.drive_lbl.config(text="출발 준비…", foreground="#f57c00")
         self.after(500, lambda: self.send("DEV", "DRIVE", "FOLLOW"))
+
+    def _start_uturn(self):
+        """카메라를 LINE 자세로 내리고 0.5초 뒤 제자리 유턴. 라인을 다시 찾으면 멈춤 (이후 ▶ 출발로 주행)."""
+        if not self.send("DEV", "POSE", "LINE"):
+            return
+        self.drive_lbl.config(text="U턴 준비…", foreground="#f57c00")
+        self.after(500, lambda: self.send("DEV", "DRIVE", "UTURN"))
 
     def _send_speed(self):
         self.send("DEV", "SPEED", float(round(self.speed.get(), 2)))
@@ -364,6 +373,7 @@ class DevTab(ttk.Frame):
             text, color = {"RUNNING": ("주행 중", "#2e7d32"), "RECHECK": (f"라인 재확인 {r['result']}", "#f57c00"),
                            "VERIFY": (f"멈춰서 확인: {r['result']}", "#f57c00"),
                            "MARKER": (f"마커 확인: {r['result']}", "#f57c00"), "TURN": (f"회전: {r['result']}", "#1565c0"),
+                           "UTURN": ("U턴 중", "#1565c0"),
                            "DONE": (f"끝: {r['result']}", "black"),
                            "REJECTED": (f"거부: {r['result']}", "#d32f2f")}.get(r["state"], (r["state"], "black"))
             self.drive_lbl.config(text=text, foreground=color)

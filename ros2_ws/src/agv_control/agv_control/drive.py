@@ -1,6 +1,7 @@
 """주행 제어 (② 순수 로직) — 라인 상태 → /cmd_vel (functional_design F4·F5, class_design 3.1).
 
-지금 구현: FOLLOW_TO_EVENT(라인 따라가다 이벤트에서 정지), STOP. TURN·STRAIGHT·UTURN·APPROACH는 S2·S7·S8에서 추가.
+지금 구현: FOLLOW_TO_EVENT(라인 따라가다 이벤트에서 정지), UTURN(제자리에서 돌아 왔던 라인을 다시 찾음), STOP.
+TURN·STRAIGHT·APPROACH는 S2·S7에서 추가.
 부호: 오프셋 + = 라인이 오른쪽 → 오른쪽으로 돌아야 함 → /cmd_vel z는 음수 (z > 0 = 왼쪽 회전, agv_hw.logic.mix).
 각도 보정: 라인 각도가 90° ± heading_deadband_deg(85~95°)를 벗어나면 벗어난 만큼 회전에 더함.
   각도 < 85 (위쪽이 오른쪽으로 기움) → 오른쪽으로, 각도 > 95 → 왼쪽으로.
@@ -59,6 +60,8 @@ class DriveConfig:
     turn_seen_frames: int = 3       # 새 라인이 이만큼 연속 보이면 회전 끝
     turn_timeout_s: float = 4.0     # 이 시간 안에 못 찾으면 정지·E_LINE
     turn_settle_s: float = 1.0      # 회전 후 이 시간은 정지선·코너·라인 끝을 무시 (분기점 가로선 재검출 방지)
+    uturn_min_s: float = 1.5        # 유턴 시작 후 이 시간은 새 라인으로 인정 안 함 (정지선·옆 갈래에서 멈추지 않게)
+    uturn_timeout_s: float = 8.0    # 이 시간 안에 라인을 못 찾으면 정지·E_TURN
 
 
 @dataclass
@@ -156,7 +159,9 @@ class DriveController:
 
     @property
     def phase(self) -> str:
-        """지금 단계 — 앱 표시용. "FOLLOW", "RECHECK 2/3", "VERIFY STOP_LINE", "MARKER red", "TURN LEFT"."""
+        """지금 단계 — 앱 표시용. "FOLLOW", "RECHECK 2/3", "VERIFY STOP_LINE", "MARKER red", "TURN LEFT", "UTURN"."""
+        if self.command == DriveCommand.UTURN:
+            return "UTURN"
         if self.check_t is not None:
             return f"MARKER {self.target}"
         if self.turn_dir:
@@ -205,6 +210,8 @@ class DriveController:
         self.last = DriveOutput(0.0, 0.0)
         self._clear_phases()
         self.cooldown = self.marker_ignore = self.event_ignore = 0.0
+        if self.command == DriveCommand.UTURN:          # 왼쪽으로 제자리 회전 — 전진 없음 (정지선 너머로 가지 않게)
+            self.turn_dir, self.turn_stage, self.turn_t, self.turn_frames, self.turn_offset = 1, "LEAVE", 0.0, 0, None
 
     def cancel(self) -> DriveOutput:
         self.command = None
@@ -217,7 +224,7 @@ class DriveController:
             return DriveOutput(0.0, 0.0)
         if self.command == DriveCommand.STOP:
             return self.cancel()
-        if self.command != DriveCommand.FOLLOW_TO_EVENT:
+        if self.command not in (DriveCommand.FOLLOW_TO_EVENT, DriveCommand.UTURN):
             name, self.command = self.command.value, None
             return DriveOutput(0.0, 0.0, True, f"E_UNSUPPORTED_{name}")
 
@@ -350,18 +357,20 @@ class DriveController:
                 and abs(line.angle - 90.0) <= c.turn_accept_deg)
 
     def _step_turn(self, line: LineInput | None, dt: float) -> DriveOutput:
-        """전진 → 제자리 회전 → 기존 라인이 벗어난 뒤 새 라인이 보이면 끝. 회전 각도는 재지 않음."""
+        """전진 → 제자리 회전 → 기존 라인이 벗어난 뒤 새 라인이 보이면 끝. 회전 각도는 재지 않음.
+        유턴은 전진 없이 같은 방식으로 돌고, 라인을 찾으면 멈춰서 끝낸다."""
         c = self.cfg
+        uturn = self.command == DriveCommand.UTURN
         self.turn_t += dt
         if self.turn_stage == "FORWARD":
             if self.turn_t < c.turn_forward_s:
                 self.last = DriveOutput(c.event_speed, 0.0)
                 return self.last
             self.turn_stage, self.turn_t, self.turn_frames, self.turn_offset = "LEAVE", 0.0, 0, None
-        if self.turn_t >= c.turn_timeout_s:
+        if self.turn_t >= (c.uturn_timeout_s if uturn else c.turn_timeout_s):
             self.command = None
             self._clear_phases()
-            return DriveOutput(0.0, 0.0, True, "E_LINE")
+            return DriveOutput(0.0, 0.0, True, "E_TURN" if uturn else "E_LINE")
         self.last = DriveOutput(0.0, round(self.turn_dir * c.turn_speed, 3))
         if line is None:
             return self.last
@@ -375,8 +384,13 @@ class DriveController:
             if self.turn_frames < c.turn_clear_frames and not jumped:
                 return self.last
             self.turn_stage, self.turn_frames = "SEEK", 0
-        self.turn_frames = self.turn_frames + 1 if ahead and self.turn_t >= c.turn_min_s else 0
+        min_s = c.uturn_min_s if uturn else c.turn_min_s
+        self.turn_frames = self.turn_frames + 1 if ahead and self.turn_t >= min_s else 0
         if self.turn_frames >= c.turn_seen_frames:
+            if uturn:
+                self.command = None
+                self._clear_phases()
+                return DriveOutput(0.0, 0.0, True, "UTURN_DONE")
             self.turn_dir = 0
             self.pid.reset()
             self.event_ignore = self.cooldown = c.turn_settle_s
