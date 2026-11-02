@@ -9,7 +9,8 @@
   라인 각도    : 관심 영역 맨 아래 줄부터 위로, 줄마다 바로 아래 줄 위치에 가까운 가는 구간을 따라가 중심점을 모으고
                 직선 x = a·y + b로 맞춰 각도 계산 — 90° = 화면 위로 똑바로, 90° 미만 = 위쪽이 오른쪽으로 기움
                 (두 끝점만 쓰면 끝부분 흔들림에 민감해서 직선 맞춤)
-  중간 띠       : 고른 라인과 **이어진** 가로 검은 영역 — 폭·화면 양끝 도달 → 정지선·코너
+  정지선       : 관심 영역 전체를 아래→위로, 라인을 양쪽으로 가로지르는 줄이 라인 굵기 × stop_min_thickness 줄 이상 연속
+  중간 띠       : 고른 라인과 **이어진** 가로 검은 영역 — 폭·화면 양끝 도달 → 코너
   먼 띠(위)     : 고른 라인과 이어진 가운데 쪽 세로 라인 = "앞쪽 라인 있음"
   (가중치는 라인 고르기에만 — 코너 라인은 화면 끝까지 뻗어야 하므로 이벤트는 "이어져 있는지"로 거른다)
   갈림길(분기점)은 판정하지 않는다 → 색 마커 인식이 맡음 (2026-10-30 결정). T자·옆 갈래 모양은 NONE,
@@ -35,9 +36,9 @@ class LineConfig:
     min_pixels: int = 60                # 가까운 띠에 이보다 적으면 라인 없음
     column_fill: float = 0.4            # 띠 높이의 몇 % 이상 검으면 그 열을 "검은 열"로 봄
     edge_ratio: float = 0.05            # 화면 양끝 몇 % 안에 닿으면 "끝까지"
-    stop_line_width_ratio: tuple = (2.0, 8.0)   # 정지선 = 가로 폭이 라인 굵기의 2~8배 (10cm ÷ 19mm ≈ 5.3배라 5배에서 늘림)
-    stop_min_thickness: float = 0.8     # 정지선 세로 두께 ≥ 라인 굵기 × 이 값 — 바닥의 얇은 줄눈·자국 제외
-                                        #   (정지선은 40~50mm 테이프로 라인 19mm보다 두꺼움, 원근으로 세로는 줄어 보임)
+    stop_line_width_ratio: tuple = (2.0, 12.0)  # 정지선 = 가로 폭이 라인 굵기의 2~12배 (화면 양끝에 닿으면 정지선 아님)
+    stop_min_thickness: float = 0.65    # 정지선 세로 두께 ≥ 라인 굵기 × 이 값 — 바닥의 얇은 줄눈·자국 제외
+                                        #   (2026-11-02 실측: 라인과 같은 테이프가 원근으로 눌려 0.76~0.79배로 보임)
     ahead_center_ratio: float = 0.4     # 먼 띠에서 가운데 ±40% 안의 세로 라인 = 앞쪽 라인
     default_line_px: int = 20           # 라인 굵기 추정이 안 될 때
     max_line_px: int = 45               # 한 줄에서 이보다 넓은 검은 구간은 라인이 아님 (두꺼운 물체, 붙은 물체)
@@ -243,6 +244,8 @@ class LineDetector:
         """F4 판단표 — 고른 라인과 이어진 영역에서 중간 띠의 가로 폭·양끝 도달, 먼 띠의 앞쪽 라인.
         갈림길은 마커 인식이 맡으므로 T자·옆 갈래 모양은 NONE."""
         c = self.cfg
+        if self._has_stop_line(line, line_px):
+            return LineEvent.STOP_LINE
         h = line.shape[0]
         far, mid = line[: h // 3], line[h // 3: 2 * h // 3]
         w = mid.shape[1]
@@ -255,26 +258,43 @@ class LineDetector:
         left, right = widest[0] < edge, widest[1] >= w - edge
         ahead = any(abs((a + b) / 2 - w / 2) <= w * c.ahead_center_ratio and (b - a + 1) < 3 * line_px
                     for a, b in _spans(_black_columns(far, c.column_fill)))
-        lo, hi = c.stop_line_width_ratio
+        lo, _ = c.stop_line_width_ratio
         if left and right or (left or right) and ahead:        # T자·옆 갈래 = 갈림길 → 마커 인식
+            return LineEvent.NONE
+        if (left or right) and width < lo * line_px:           # 곧은 라인이 화면 끝에 있을 뿐 — 가로로 뻗지 않음
             return LineEvent.NONE
         if left:
             return LineEvent.CORNER_LEFT
         if right:
             return LineEvent.CORNER_RIGHT
-        if lo * line_px <= width <= hi * line_px and self._is_stop_line(line, widest, line_px):
-            return LineEvent.STOP_LINE
         return LineEvent.NONE
 
-    def _is_stop_line(self, line: np.ndarray, span: tuple, line_px: float) -> bool:
-        """가로 검은 영역이 정지선인지 — ① 라인의 왼쪽·오른쪽에 모두 걸침 ② 라인 바깥 부분의 세로 두께가
-        라인 굵기 × stop_min_thickness 이상 (2026-10-30 S1: 바닥의 얇은 가로선이 정지선으로 잡힘)."""
+    def _has_stop_line(self, line: np.ndarray, line_px: float) -> bool:
+        """아래 줄부터 위로 라인을 따라가며, 라인을 왼쪽·오른쪽으로 모두 가로지르는 줄이 연속으로 충분히 있는지.
+        폭 = 라인 굵기의 2~12배, 화면 양끝에 닿지 않음, 연속 줄 수(두께) ≥ 라인 굵기 × stop_min_thickness.
+        띠에 묶이지 않아 정지선이 관심 영역 어디에 있어도 잡힘 (2026-11-02 실제 사진: 중간 띠 기준은 잡히는 구간이 좁음).
+        라인과 같은 테이프는 원근으로 눌려 0.76~0.79배로 보임, 바닥의 얇은 선은 줄 수가 모자람."""
         c = self.cfg
-        a, b = span
-        line_x = (self.offset + 1) * c.width / 2
-        keep_out = 1.5 * line_px                                   # 세로 라인이 지나가는 열은 두께에서 뺌
-        if a > line_x - keep_out or b < line_x + keep_out:          # 한쪽에만 붙은 자국
-            return False
-        cols = [x for x in range(a, b + 1) if abs(x - line_x) > keep_out]
-        thickness = float(np.median((line[:, cols] > 0).sum(axis=0)))
-        return thickness >= c.stop_min_thickness * line_px
+        lo, hi = c.stop_line_width_ratio
+        edge = max(1, int(c.width * c.edge_ratio))
+        need = max(2, c.stop_min_thickness * line_px)
+        keep_out = 1.5 * line_px
+        ref = (self.offset + 1) * c.width / 2                 # 아래에서 위로 올라가며 라인 위치를 따라감
+        rows = best = 0
+        for y in range(line.shape[0] - 1, -1, -1):
+            spans = _spans(line[y] > 0)
+            if not spans:
+                rows = 0
+                continue
+            a, b = min(spans, key=lambda s: 0 if s[0] <= ref <= s[1] else min(abs(s[0] - ref), abs(s[1] - ref)))
+            width = b - a + 1
+            if width <= c.max_line_px:                        # 라인만 있는 줄 — 위치 갱신
+                ref = (a + b) / 2
+                rows = 0
+            elif (lo * line_px <= width <= hi * line_px and a >= edge and b < c.width - edge
+                  and a <= ref - keep_out and b >= ref + keep_out):
+                rows += 1
+                best = max(best, rows)
+            else:
+                rows = 0
+        return best >= need
