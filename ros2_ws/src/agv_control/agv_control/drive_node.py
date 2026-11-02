@@ -19,10 +19,13 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool, Float32, String
 
-from agv_control.drive import DriveConfig, DriveController, LineInput
+from agv_control.drive import DriveConfig, DriveController, LineInput, merge_stop_line
 from agv_interfaces.action import Drive
-from agv_interfaces.msg import LineState
+from agv_interfaces.msg import LineState, StopLineState
 from agv_protocol.types import DriveCommand, LineEvent
+
+
+STOP_LINE_FRESH_S = 0.3         # 이보다 오래된 /stop_line/state는 무시
 
 
 def _event(name: str) -> LineEvent:
@@ -47,10 +50,13 @@ class DriveNode(Node):
         self.finished = threading.Event()
         self.result = ""
         self.estop = False
+        self.stop_line = (False, False, 0.0)        # 마지막 정지선 판정 (있음, 확정, 받은 시각)
 
         group = ReentrantCallbackGroup()
         self.pub = self.create_publisher(Twist, "/cmd_vel", QoSProfile(depth=1))
         self.create_subscription(LineState, "/line/state", self.on_line,
+                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT), callback_group=group)
+        self.create_subscription(StopLineState, "/stop_line/state", self.on_stop_line,
                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT), callback_group=group)
         self.create_subscription(Bool, "/safety/estop", self.on_estop, QoSProfile(depth=10), callback_group=group)
         self.create_subscription(Float32, "/drive/speed", self.on_speed, QoSProfile(depth=10), callback_group=group)
@@ -65,9 +71,17 @@ class DriveNode(Node):
 
     def on_line(self, msg: LineState):
         with self.lock:
-            self.line = LineInput(float(msg.offset), bool(msg.line_found), _event(msg.event), _event(msg.raw_event),
-                                  float(msg.angle), bool(msg.angle_valid))
+            line = LineInput(float(msg.offset), bool(msg.line_found), _event(msg.event), _event(msg.raw_event),
+                             float(msg.angle), bool(msg.angle_valid))
+            detected, confirmed, when = self.stop_line
+            if time.monotonic() - when <= STOP_LINE_FRESH_S:     # 오래된 정지선 판정은 쓰지 않음
+                line = merge_stop_line(line, detected, confirmed)
+            self.line = line
             self.offset = float(msg.offset)
+
+    def on_stop_line(self, msg: StopLineState):
+        with self.lock:
+            self.stop_line = (bool(msg.detected), bool(msg.confirmed), time.monotonic())
 
     def on_estop(self, msg: Bool):
         with self.lock:

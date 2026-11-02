@@ -36,7 +36,7 @@ class DriveConfig:
     recheck_tries: int = 3          # LINE_END 후 정지한 채 라인을 다시 보는 횟수 (0이면 바로 끝)
     recheck_s: float = 0.5          # 한 번 보는 시간
     recheck_frames: int = 3         # 라인이 이만큼 연속 보이면 자동으로 다시 출발
-    verify_clear_frames: int = 3    # 멈춰서 확인 중 판정이 이만큼 연속 사라지면 오판정 → 다시 출발
+    verify_clear_frames: int = 5    # 멈춰서 확인 중 판정이 이만큼 연속 사라지면 오판정 → 다시 출발
     verify_timeout_s: float = 2.0   # 확정도 사라짐도 없이 이 시간이 지나면 다시 출발 (판정이 깜빡이는 경우)
     verify_cooldown_s: float = 0.5  # 오판정으로 다시 출발한 뒤 이 시간은 판정으로 멈추지 않음 (같은 자리 반복 방지)
 
@@ -58,6 +58,13 @@ class DriveOutput:
     angular: float                  # /cmd_vel z
     done: bool = False
     result: str = ""                # 끝난 이유: 이벤트 이름, STOPPED, E_LINE
+
+
+def merge_stop_line(line: LineInput, detected: bool, confirmed: bool) -> LineInput:
+    """line_node 결과에 stop_line_node 판정을 합침 — 정지선이 있으면 이벤트를 STOP_LINE으로."""
+    event = LineEvent.STOP_LINE if confirmed else line.event
+    raw = LineEvent.STOP_LINE if detected or confirmed else line.raw_event
+    return LineInput(line.offset, line.line_found, event, raw, line.angle, line.angle_valid)
 
 
 class PidController:

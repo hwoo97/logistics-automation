@@ -123,6 +123,16 @@ CONFIRMED_STOP = LineInput(0.0, True, LineEvent.STOP_LINE, LineEvent.STOP_LINE)
 CLEAR = LineInput(0.0, True)
 
 
+def test_merge_stop_line():
+    from agv_control.drive import merge_stop_line
+    base = LineInput(0.2, True, LineEvent.NONE, LineEvent.NONE, 88.0, True)
+    assert merge_stop_line(base, False, False) == base
+    m = merge_stop_line(base, True, False)
+    assert (m.raw_event, m.event, m.offset, m.angle) == (LineEvent.STOP_LINE, LineEvent.NONE, 0.2, 88.0)
+    m = merge_stop_line(base, True, True)
+    assert (m.raw_event, m.event) == (LineEvent.STOP_LINE, LineEvent.STOP_LINE)
+
+
 def test_halts_on_first_raw_stop_line():
     """판정 첫 프레임에 바로 정지 — 달리면서 확인 프레임을 채우면 지나침 (2026-11-02 S1)."""
     d = follow()
@@ -143,7 +153,7 @@ def test_false_stop_line_resumes():
     """판정이 사라지면 오판정 — 다시 출발, 잠시 같은 판정으로 안 멈춤."""
     d = follow()
     d.step(RAW_STOP, DT)
-    for _ in range(3):
+    for _ in range(5):
         assert d.step(CLEAR, DT).linear == 0
     assert d.phase == "FOLLOW" and d.active
     assert d.step(CLEAR, DT).linear > 0
@@ -164,7 +174,7 @@ def test_flickering_judgement_times_out():
 def test_confirmed_during_cooldown_still_stops():
     d = follow()
     d.step(RAW_STOP, DT)
-    for _ in range(3):
+    for _ in range(5):
         d.step(CLEAR, DT)
     out = d.step(CONFIRMED_STOP, DT)
     assert out.done and out.result == "STOP_LINE"

@@ -8,7 +8,7 @@ from agv_vision.line_detect import EventConfirmer, LineConfig, LineDetector
 W, H, LW = 320, 240, 20           # 라인 굵기 20px
 TOP = 160                          # 관심 영역 시작 행 → 먼 띠 160~185, 중간 186~212, 가까운 띠 213~239
 MID_Y = (192, 206)                 # 중간 띠 안의 가로 라인 (코너·갈래, 라인 테이프 굵기)
-STOP_Y = (188, 212)                # 정지선 — 40~50mm 테이프라 라인보다 두꺼움 (24px)
+STOP_Y = (188, 212)                # 정지선 모양 (판정은 stop_line_node, 여기서는 라인 판정에 지장 없는지만)
 
 
 def floor():
@@ -80,47 +80,14 @@ def test_junctions_are_left_to_markers(make):
     assert r.line_found and r.event == LineEvent.NONE and abs(r.offset) < 0.1
 
 
-def test_stop_line():
-    img = floor()
-    vline(img, 160)
-    hline(img, 110, 210, STOP_Y)          # 폭 100px = 라인 굵기 5배, 두께 24px
-    assert run(img).event == LineEvent.STOP_LINE
-
-
-@pytest.mark.parametrize("x0, x1", [(85, 235), (40, 270)])
-def test_wide_stop_line(x0, x1):
-    """긴 정지선 — 7.5배, 11.5배 (화면 끝에 닿지 않으면 정지선)."""
-    img = floor()
-    vline(img, 160)
-    hline(img, x0, x1, STOP_Y)
-    assert run(img).event == LineEvent.STOP_LINE
-
-
-@pytest.mark.parametrize("y", [165, 180, 195, 210, 220])
-def test_stop_line_found_anywhere_in_roi(y):
-    """먼 띠부터 가까운 띠까지 어디 있어도 잡힘 — 확인 프레임을 채울 시간이 남음 (이전엔 중간 띠에서만)."""
-    img = floor()
-    vline(img, 160)
-    hline(img, 100, 220, (y, y + 15))
-    assert run(img).event == LineEvent.STOP_LINE
-
-
-def test_stop_line_on_tilted_line():
-    """기울어진 라인 — 정지선 위치의 라인을 기준으로 양쪽 걸침을 봄."""
-    import cv2
-    img = floor()
-    cv2.line(img, (120, H - 1), (220, 100), (25, 25, 25), LW)
-    x_at_y = 120 + (H - 1 - 180) * 100 // (H - 1 - 100)
-    hline(img, x_at_y - 60, x_at_y + 60, (170, 190))   # 기운 라인은 가로 폭이 굵어 두께도 넉넉히
-    assert run(img).event == LineEvent.STOP_LINE
-
-
-def test_same_tape_stop_line_foreshortened():
-    """라인과 같은 테이프 — 원근으로 세로가 눌려 라인의 0.76배로 보임 (2026-11-02 실제 사진: 라인 24~25px, 가로 테이프 19px)."""
-    img = floor()
-    vline(img, 160)
-    hline(img, 110, 210, (192, 207))      # 두께 15px = 라인 20px의 0.75배
-    assert run(img).event == LineEvent.STOP_LINE
+def test_confirmer_tolerates_one_missed_frame():
+    """정지선은 한 프레임 빠져도 이어서 셈, 두 프레임 연속 빠지면 처음부터."""
+    from agv_vision.line_detect import EventConfirmer
+    s, n = LineEvent.STOP_LINE, LineEvent.NONE
+    c = EventConfirmer(3, tolerant={s})
+    assert [c.push(e) for e in (s, n, s, n, s)] == [n, n, n, n, s]
+    c = EventConfirmer(3, tolerant={s})
+    assert [c.push(e) for e in (s, s, n, n, s, s)] == [n] * 6
 
 
 @pytest.mark.parametrize("x", [296, 24])
@@ -130,25 +97,6 @@ def test_straight_line_near_edge_is_not_corner(x):
     vline(img, x)
     r = run(img)
     assert r.line_found and r.raw_event == LineEvent.NONE and r.event == LineEvent.NONE
-
-
-@pytest.mark.parametrize("thick", [6, 11, 12])
-def test_thin_floor_line_is_not_stop_line(thick):
-    """바닥의 얇은 가로선(줄눈·자국)이 라인을 가로질러도 정지선 아님 (2026-10-30 S1).
-    6px은 중간 띠 40% 조건에서, 11·12px은 두께 조건(라인 20px × 0.65 = 13px)에서 걸러짐."""
-    img = floor()
-    vline(img, 160)
-    img[196:196 + thick, 115:205] = 25         # 폭 90px — 이전 기준(2~5배) 안
-    r = run(img)
-    assert r.raw_event == LineEvent.NONE and r.event == LineEvent.NONE
-
-
-def test_one_sided_mark_is_not_stop_line():
-    """라인 한쪽에만 붙은 두꺼운 자국 — 정지선은 라인 양쪽으로 걸쳐야 함."""
-    img = floor()
-    vline(img, 160)
-    hline(img, 160, 250, STOP_Y)
-    assert run(img).raw_event == LineEvent.NONE
 
 
 def terrazzo():
@@ -201,9 +149,9 @@ def test_set_frames_applies_immediately():
     det = LineDetector(LineConfig())
     det.set_frames("CONFIRM", 1)
     img = floor()
-    vline(img, 160)
-    hline(img, 110, 210, STOP_Y)
-    assert det.process(img).event == LineEvent.STOP_LINE      # 1프레임에 확정
+    vline(img, 160, MID_Y[0], H)
+    hline(img, 0, 170)
+    assert det.process(img).event == LineEvent.CORNER_LEFT    # 1프레임에 확정
     with pytest.raises(ValueError):
         det.set_frames("FPS", 5)
 
@@ -312,12 +260,16 @@ def test_thick_object_does_not_inflate_line_width():
     img[150:240, 55:135] = 30
     for _ in range(3):
         det.process(img)
-    stop = floor()
-    vline(stop, 160)
-    hline(stop, 110, 210, STOP_Y)
-    for _ in range(3):
-        r = det.process(stop)
-    assert r.event == LineEvent.STOP_LINE and det.line_px <= LineConfig().max_line_px
+    assert det.line_px <= LineConfig().max_line_px
+
+
+def test_stop_line_shape_does_not_disturb_line():
+    """정지선 모양이 있어도 라인 판정은 그대로 — 정지선 판정은 stop_line_node가 함."""
+    img = floor()
+    vline(img, 160)
+    hline(img, 110, 210, STOP_Y)
+    r = run(img)
+    assert r.line_found and abs(r.offset) < 0.05 and r.raw_event == LineEvent.NONE
 
 
 def slanted(x_bottom, x_top, y0=0):

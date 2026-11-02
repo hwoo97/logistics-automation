@@ -13,7 +13,7 @@
 | F1 | 영상 획득 | Camera Module 3 Wide (IMX708, CSI) | `camera_ros` (기존 패키지) | S0 |
 | F2 | 카메라 각도 전환 | SG90 × 2 ← PCA9685 (I2C) | `pantilt_node` | S0, S6 |
 | F3 | 모터 구동 | TT 모터 4개 ← DRV8835 × 2 (GPIO 18~25) | `motor_node` | S0 |
-| F4 | 라인 추종·이벤트 검출 | 카메라 | `line_node` + `drive_node` | S1~S3 |
+| F4 | 라인 추종·이벤트 검출 | 카메라 | `line_node` + `stop_line_node` + `drive_node` | S1~S3 |
 | F5 | 직각 회전·유턴 | 모터 + 카메라 | `drive_node` | S2, S8 |
 | F6 | 색 마커 판별 | 카메라 | `marker_node` | S4, S5 |
 | F7 | 화물·표지판 인식 (AI) | 카메라 | `classifier_node` | S6, S7 |
@@ -32,6 +32,7 @@
  ┌──────────────────────── Raspberry Pi 5 (ROS 2 Jazzy) ────────────────────────┐
  │                                                                              │
  │  camera_ros ──/camera/image_raw──┬──► line_node ──/line/state──► drive_node  │
+ │                                  ├──► stop_line_node ─/stop_line/state─► (drive_node) │
  │                                  ├──► marker_node   (서비스)        │  ▲      │
  │                                  ├──► classifier_node (서비스)      │  │      │
  │                                  └──► bt_bridge_node (영상)     /cmd_vel│      │
@@ -62,7 +63,7 @@
 |--------|------|------|
 | `agv_interfaces` | ament_cmake | 사용자 정의 메시지·서비스 (`.msg`, `.srv`) — 인터페이스 패키지는 CMake 필수 |
 | `agv_hw` | ament_python | `motor_node`, `pantilt_node`, `ultrasonic_node`, `led_node` (lgpio, smbus2) |
-| `agv_vision` | ament_python | `line_node`, `marker_node`, `classifier_node` (OpenCV, LiteRT) |
+| `agv_vision` | ament_python | `line_node`, `stop_line_node`, `marker_node`, `classifier_node` (OpenCV, LiteRT) |
 | `agv_control` | ament_python | `drive_node`, `mission_node` |
 | `agv_bt` | ament_python | `bt_bridge_node` (Python socket RFCOMM) |
 | `agv_protocol` | ament_python | 블루투스 메시지 만들기·해석 (순수 Python, 노트북 앱도 같은 코드 사용) |
@@ -76,7 +77,8 @@
 | 이름 | 타입 | 발행 → 구독 | 주기 | 내용 |
 |------|------|-------------|------|------|
 | `/camera/image_raw` | sensor_msgs/Image | camera_ros → vision, bt | 15~30Hz | 카메라 영상 |
-| `/line/state` | agv_interfaces/LineState | line_node → drive_node | 영상 주기 | 라인 오프셋, 이벤트 |
+| `/line/state` | agv_interfaces/LineState | line_node → drive_node, stop_line_node | 영상 주기 | 라인 오프셋, 이벤트 |
+| `/stop_line/state` | agv_interfaces/StopLineState | stop_line_node → drive_node, bt_bridge | 영상 주기 | 정지선 판정·확정·기울기 |
 | `/cmd_vel` | geometry_msgs/Twist | drive_node·mission(수동) → motor_node | 20Hz | 선속도 x, 각속도 z |
 | `/ultrasonic/range` | sensor_msgs/Range | ultrasonic_node → mission_node | 15Hz | 거리(m), 필터 적용 |
 | `/pantilt/pose` | std_msgs/String | mission_node → pantilt_node | 이벤트 | `LINE` / `JUNCTION` / `SIGN` |
@@ -88,7 +90,7 @@
 | `/dev/wheels` | std_msgs/Float32MultiArray | bt_bridge → motor_node | 0.3초 반복 | 개발자 탭: L1~L4 듀티 (-1~1), 워치독 적용 |
 | `/drive/speed` | std_msgs/Float32 | bt_bridge → drive_node | 이벤트 | 개발자 탭 "주행 속도": 라인 주행 기본 선속도 (0.2~1.0), 주행 중에도 적용 |
 | `/drive/tune` | std_msgs/String | bt_bridge → drive_node | 이벤트 | 개발자 탭 "회전 세기"(`TURN 0.6`)·"라인 기준"(`CENTER -0.1`), 주행 중에도 적용 |
-| `/line/tune` | std_msgs/String | bt_bridge → line_node | 이벤트 | 개발자 탭 "확인 프레임"(`CONFIRM 3`)·"라인 끝 프레임"(`LINE_END 10`), 실행 중 적용 |
+| `/line/tune` | std_msgs/String | bt_bridge → line_node, stop_line_node | 이벤트 | 개발자 탭 "확인 프레임"(`CONFIRM 3`)·"라인 끝 프레임"(`LINE_END 10`), 실행 중 적용 |
 | `/dev/pantilt_angle` | std_msgs/Float32MultiArray | bt_bridge → pantilt_node | 이벤트 | 개발자 탭: [팬, 틸트] 각도 |
 
 ### 서비스 / 액션
@@ -108,6 +110,11 @@ string  event           # NONE / STOP_LINE / JUNCTION_T / JUNCTION_LEFT / JUNCTI
 string  raw_event       # 이번 프레임 판정 (연속 프레임 확인 전) — 검출 값 조정용
 float32 angle           # 라인 각도(도) — 90 = 똑바로, 90 미만 = 위쪽이 오른쪽으로 기움
 bool    angle_valid
+
+# StopLineState.msg
+bool    detected        # 이번 프레임 판정 — drive_node는 처음 나오면 일단 정지
+bool    confirmed       # 확인 프레임만큼 쌓여 확정
+float32 angle           # 정지선 기울기(도), 0 = 수평, + = 오른쪽이 위
 
 # Status.msg
 string state            # 상태 머신 상태 이름
@@ -251,19 +258,24 @@ def choose_branch(markers, target):          # markers: {"left": [...], "front":
 - 바퀴 위치·방향 보정표(`params.yaml`): L1~L4 → 좌전·좌후·우전·우후, 극성 반전 여부 (S0에서 확정)
 - 안전: `/cmd_vel` 0.5초 이상 끊기면 정지(워치독), `/safety/estop` true면 래치 정지
 
-### F4 · 라인 추종 (`line_node` + `drive_node`)
+### F4 · 라인 추종 (`line_node` + `stop_line_node` + `drive_node`)
 - 처리: 영상 320×240으로 축소 → 하단 1/3 관심 영역 → 검정 추출(HSV: 줄의 바닥 밝기(상위 10%) × 0.72 이하 + 채도 낮음, 색 마커 제외 — 2026-11-02 광택 테이프 반사로 고정 문턱이 라인을 잃어 변경) → 연결 성분
 - 라인 고르기 (2026-10-30, 주변 어두운 물체 대책): 줄마다 **폭 ≤ max_line_px(45px)인 가는 구간만** 라인 후보 — 두꺼운 물체는 붙어 있든 떨어져 있든 제외. 덩어리 점수 = 가는 구간 면적 × 가운데 가중치(양끝 0.3) × 직전 위치 가중치 × 화면 맨 아래에 닿으면 1.5배. 이벤트 판정은 **고른 라인과 이어진 영역만** 사용 — 가중치를 이벤트에 쓰면 화면 끝까지 뻗는 코너 라인을 놓치므로
 - 오프셋: 고른 라인의 가까운 띠(관심 영역 아래 1/3)에서 아래 줄부터 위로, 줄마다 바로 아래 줄 위치에 가까운 가는 구간 중심의 평균 → -1.0 ~ 1.0. 라인을 못 찾으면 마지막 값 유지 + LINE_END
 - 이벤트 검출 (위쪽 행 기준)
   | 이벤트 | 판단 |
   |---|---|
-  | STOP_LINE | 관심 영역 전체를 아래→위로 줄마다 보며, 고른 라인과 이어진 가로 구간이 **라인 왼쪽·오른쪽에 모두 걸치고**, 폭이 라인 폭의 2~12배이고 화면 양끝에 닿지 않는 줄이 **라인 폭 × 0.65 줄 이상 연속** (2026-11-02: 라인과 같은 테이프가 원근으로 0.76~0.79배로 보임, 실제 사진으로 확인) |
+  | STOP_LINE | **`stop_line_node`가 따로 판정** — `/stop_line/state`(아래 "정지선") |
   | ~~JUNCTION_T / LEFT / RIGHT~~ | **판정 안 함 — 분기점은 색 마커 인식이 맡음 (2026-10-30 결정)**. T자·옆 갈래 모양은 NONE, 마커를 놓쳐 T자에서 라인이 끊기면 LINE_END로 정지 |
   | CORNER_LEFT / RIGHT | 앞쪽 라인 없음 + 한쪽으로만 가로 라인 (폭이 라인 폭의 2배 이상 — 곧은 라인이 화면 끝에 있는 경우 제외) |
   | LINE_END | 관심 영역에 라인 없음 — 가까운 띠에서만 놓치고 직전 위치 근처 위쪽(중간·먼 띠)에 라인이 보이면 "잠깐 놓침"(NONE, 감속, 라인 끝 프레임의 2배까지), **10프레임 연속**이어야 확정 (2026-10-30: 3프레임이면 흔들림으로 잠깐 놓쳐도 멈춤) |
+- **정지선 (`stop_line_node`, 2026-11-02 분리·세로 열 방식):** 가로 줄 방식은 기운 정지선을 놓침(실제 사진 +5° 대부분, ±15° 전부). 같은 검정 추출을 쓰고, 라인과 이어진 덩어리에서 **열마다** 가장 긴 세로 구간을 본다
+  - 관심 영역 위·아래에 닿는 열 묶음 = 라인 (정지선이 가까운 띠에 들어오면 라인 오프셋이 끌려가므로 위치는 이것으로 판단, 오프셋은 덩어리 고르는 데만 사용)
+  - 정지선 열 = 위·아래에 닿지 않고 두께 ≥ 라인 폭 × 0.65 (위에 닿으면 아직 들어오는 중, 아래에 닿으면 곡선의 대각선 라인일 수 있음). 3열까지 끊겨도 이어진 것으로 봄(테이프 반사)
+  - 판정 = 정지선 열이 라인 왼쪽·오른쪽 모두 라인 폭 × 0.5 이상, 전체 폭 라인 폭의 3~12배, 화면 양끝 동시 도달 아님(T자 → 마커 인식), 기울기 ≤ 35°
+  - `drive_node`·`bt_bridge`가 `/line/state`에 합쳐 씀(0.3초보다 오래된 판정은 버림) — 앱 표시·주행 규칙은 그대로
 - 라인 각도 (2026-10-30, 차량이 비스듬하면 라인이 대각선으로 보이는 문제): 관심 영역 맨 아래부터 위로 줄마다 라인 중심을 따라가 직선을 맞춰 각도 계산(90° = 똑바로, 90° 미만 = 위쪽이 오른쪽). 끝점 2개 대신 직선 맞춤 — 끝부분 흔들림에 덜 민감
-- `drive_node` PID: 각속도 z = −turn_scale·(Kp·e + Kd·Δe + Kh·각도 오차/45°) (Ki는 필요 시), e = 오프셋 − center_offset(카메라가 차체 중심에서 비켜 달린 만큼, 2026-10-30 −0.10), 각도 오차는 85~95° 밖으로 벗어난 만큼만(`heading_deadband_deg` 5°). 선속도는 오차가 크면 감속. **정지선·코너는 판정 첫 프레임에 일단 정지하고 멈춘 채 확인 — 확정되면 끝, 판정이 사라지면 다시 출발** (2026-11-02: 달리면서 확인 프레임을 채우면 지나침). **LINE_END는 정지 후 3번(0.5초씩) 다시 봐서 라인이 3프레임 연속 보이면 자동 재출발, 끝까지 없으면 종료** (2026-11-02: 주행 중 잠깐 놓친 경우)
+- `drive_node` PID: 각속도 z = −turn_scale·(Kp·e + Kd·Δe + Kh·각도 오차/45°) (Ki는 필요 시), e = 오프셋 − center_offset(카메라가 차체 중심에서 비켜 달린 만큼, 2026-10-30 −0.10), 각도 오차는 85~95° 밖으로 벗어난 만큼만(`heading_deadband_deg` 5°). 선속도는 오차가 크면 감속. **정지선·코너는 판정 첫 프레임에 일단 정지하고 멈춘 채 확인 — 확정되면 끝(한 프레임 빠짐 허용), 판정이 5프레임 연속 사라지면 다시 출발** (2026-11-02: 달리면서 확인 프레임을 채우면 지나침). **LINE_END는 정지 후 3번(0.5초씩) 다시 봐서 라인이 3프레임 연속 보이면 자동 재출발, 끝까지 없으면 종료** (2026-11-02: 주행 중 잠깐 놓친 경우)
 - 같은 이벤트가 연속 3프레임 이상일 때만 확정 (노이즈 방지)
 
 ### F5 · 직각 회전·유턴 (`drive_node`)

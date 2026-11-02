@@ -45,7 +45,7 @@
 logistics-automation/
 ├─ ros2_ws/src/
 │  ├─ agv_interfaces/               # ament_cmake — 메시지·서비스·액션 정의
-│  │  ├─ msg/  LineState.msg  Status.msg  Command.msg
+│  │  ├─ msg/  LineState.msg  StopLineState.msg  Status.msg  Command.msg
 │  │  ├─ srv/  DetectMarkers.srv  Classify.srv
 │  │  ├─ action/  Drive.action
 │  │  ├─ CMakeLists.txt  package.xml
@@ -61,8 +61,8 @@ logistics-automation/
 │  │
 │  ├─ agv_vision/                   # 영상 알고리즘 + 노드
 │  │  └─ agv_vision/
-│  │     ├─ line_detector.py  marker_detector.py  classifier.py
-│  │     ├─ line_node.py  marker_node.py  classifier_node.py
+│  │     ├─ line_detect.py  stop_line.py  marker_detector.py  classifier.py
+│  │     ├─ line_node.py  stop_line_node.py  marker_node.py  classifier_node.py
 │  │
 │  ├─ agv_control/                  # 주행·상태 머신
 │  │  └─ agv_control/
@@ -112,10 +112,12 @@ logistics-automation/
 ### agv_vision — 영상
 | 모듈 | 클래스 / 함수 | 입력 → 출력 |
 |------|--------------|-------------|
-| `line_detector.py` | `LineDetector.process(bgr) -> LineResult` | 영상 → 오프셋, 라인 유무, 이벤트(STOP_LINE·JUNCTION_*·CORNER_*·LINE_END) + 연속 프레임 확정 |
+| `line_detect.py` | `LineDetector.process(bgr) -> LineResult` | 영상 → 오프셋, 라인 유무, 각도, 이벤트(CORNER_*·LINE_END) + 연속 프레임 확정 |
+| `stop_line.py` | `StopLineDetector.process(bgr, offset) -> StopLineResult` | 영상·오프셋 → 정지선 판정(세로 열 방식)·확정·기울기 |
 | `marker_detector.py` | `MarkerDetector.detect(bgr) -> dict[str, list[str]]` | 영상 → 갈래별 색 목록, `vote(frames)` 다수결 |
 | `classifier.py` | `TfliteClassifier.predict(bgr) -> (label, score)`, `decide(results)` | LiteRT 추론, 5프레임 판정 규칙 |
 | `line_node.py` | `LineNode` | 영상 구독(최신 1장) → `/line/state` 발행 |
+| `stop_line_node.py` | `StopLineNode` | 영상 + `/line/state` 오프셋 → `/stop_line/state` 발행 |
 | `marker_node.py` | `MarkerNode` | `/marker/detect` 요청 시 최근 프레임 10장으로 판별 |
 | `classifier_node.py` | `ClassifierNode` | `/vision/classify` 요청 시 모델(CARGO/SIGN) 선택 → 판정 |
 
@@ -163,7 +165,7 @@ logistics-automation/
 | 데이터 | 설정 | 이유 |
 |--------|------|------|
 | 카메라 영상 | BEST_EFFORT, 깊이 1 | 최신 프레임만 의미 있음 |
-| `/line/state` | BEST_EFFORT, 깊이 1 | 오래된 오프셋은 버림 |
+| `/line/state`, `/stop_line/state` | BEST_EFFORT, 깊이 1 | 오래된 값은 버림 |
 | `/cmd_vel` | RELIABLE, 깊이 1 | 최신 명령 |
 | `/mission/command`, `/safety/estop`, `/led/state`, `/pantilt/pose` | RELIABLE, 깊이 10 | 명령 유실 방지 |
 | `/mission/status` | RELIABLE, 깊이 1 | 최신 상태 |
@@ -182,7 +184,8 @@ logistics-automation/
 ```yaml
 motor_node:      { ros__parameters: { duty_max: 0.75, pwm_hz: 1000, wheel_map: [...], invert: [...], use_fake_hw: false } }
 pantilt_node:    { ros__parameters: { pan_channel: 0, tilt_channel: 1, poses: { LINE: [70, 130], JUNCTION: [65, 165], SIGN: [65, 180] } } }
-line_node:       { ros__parameters: { roi_ratio: 0.33, stop_line_width_ratio: [2.0, 5.0], confirm_frames: 3 } }
+line_node:       { ros__parameters: { roi_ratio: 0.33, confirm_frames: 3 } }
+stop_line_node:  { ros__parameters: { width_ratio: [3.0, 12.0], min_thickness: 0.65, confirm_frames: 3 } }
 marker_node:     { ros__parameters: { hsv: { red: [...], green: [...], blue: [...], yellow: [...] }, min_area: 200, vote_frames: 10 } }
 classifier_node: { ros__parameters: { cargo_model: models/cargo.tflite, sign_model: models/sign.tflite, min_score: 0.8 } }
 ultrasonic_node: { ros__parameters: { rate_hz: 15, median_window: 5 } }
@@ -245,7 +248,7 @@ bt_bridge_node:  { ros__parameters: { heartbeat_timeout_s: 1.5, video_fps: 5, vi
 |:---:|------|:---:|
 | 1 | `agv_interfaces`, `agv_protocol`, `agv_bringup` 골격 | 빌드 |
 | 2 | 드라이버 4종(실제·가짜) + hw 노드 4개, camera_ros 설정 | S0 |
-| 3 | `LineDetector` + `line_node`, `PidController` + `DriveController` + `drive_node` | S1~S3, S8 |
+| 3 | `LineDetector` + `line_node`, `StopLineDetector` + `stop_line_node`, `PidController` + `DriveController` + `drive_node` | S1~S3, S8 |
 | 4 | `MarkerDetector` + `marker_node`, `branch_selector` | S4, S5 |
 | 5 | 노트북 앱 + `agv_bt` (제어 채널 먼저, 영상 나중) | S0 |
 | 6 | `TfliteClassifier` + `classifier_node` (데이터 수집 → 학습) | S6, S7 |

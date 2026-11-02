@@ -12,12 +12,13 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    description="카메라 영상 처리 — 라인 검출 (색 마커·AI 분류는 다음 단계)",
+    description="카메라 영상 처리 — 라인 검출, 정지선 판정 (색 마커·AI 분류는 다음 단계)",
     license="MIT",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
             "line_node = agv_vision.line_node:main",
+            "stop_line_node = agv_vision.stop_line_node:main",
         ],
     },
 )

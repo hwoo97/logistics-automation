@@ -233,7 +233,6 @@ class Prediction:
 class LineConfig:
     width: int = 320; height: int = 240
     roi_ratio: float = 0.33
-    stop_line_width_ratio: tuple[float, float] = (2.0, 5.0)
     confirm_frames: int = 3
 
 @dataclass

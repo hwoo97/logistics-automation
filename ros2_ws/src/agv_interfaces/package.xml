@@ -3,7 +3,7 @@
 <package format="3">
   <name>agv_interfaces</name>
   <version>0.1.0</version>
-  <description>물류 AGV 사용자 정의 메시지 (LineState, 액션 Drive — Status·Command는 상태 머신 작업 때 추가)</description>
+  <description>물류 AGV 사용자 정의 메시지 (LineState, StopLineState, 액션 Drive — Status·Command는 상태 머신 작업 때 추가)</description>
   <maintainer email="noreply@example.com">logistics-automation team</maintainer>
   <license>MIT</license>
 

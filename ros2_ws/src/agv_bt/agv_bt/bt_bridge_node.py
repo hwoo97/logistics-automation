@@ -39,6 +39,7 @@ class BtBridgeNode(Node):
         self.sys = SysMonitor()
         self._last_range_sent = 0.0
         self._last_line_sent = 0.0
+        self._stop_line = (False, False, 0.0)                 # 마지막 정지선 판정 (있음, 확정, 받은 시각)
 
         q10 = QoSProfile(depth=10)
         self.pub_estop = self.create_publisher(Bool, "/safety/estop", q10)
@@ -53,9 +54,10 @@ class BtBridgeNode(Node):
         self.create_subscription(Range, "/ultrasonic/range", self.on_range, qos_profile_sensor_data)
         self.create_subscription(Image, camera_topic, self.on_image, qos_profile_sensor_data)
         try:                                                  # agv_interfaces가 없으면 LINE만 빠짐
-            from agv_interfaces.msg import LineState
-            self.create_subscription(LineState, "/line/state", self.on_line_state,
-                                     QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
+            from agv_interfaces.msg import LineState, StopLineState
+            best_effort = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
+            self.create_subscription(LineState, "/line/state", self.on_line_state, best_effort)
+            self.create_subscription(StopLineState, "/stop_line/state", self.on_stop_line, best_effort)
         except ImportError:
             self.get_logger().warn("agv_interfaces 없음 — DEV LINE 보내지 않음")
         self.drive_client, self._drive_goal = None, None    # 노트북 앱 "라인 주행 시작/정지" → /drive 액션
@@ -207,7 +209,15 @@ class BtBridgeNode(Node):
         if "LINE" in self.core.watches and now - self._last_line_sent >= WATCH_PERIOD_S:
             self._last_line_sent = now
             angle = round(msg.angle, 1) if msg.angle_valid else "-"
-            self.send(format_dev("LINE", round(msg.offset, 2), msg.event or "NONE", msg.raw_event or "NONE", angle))
+            event, raw = msg.event or "NONE", msg.raw_event or "NONE"
+            detected, confirmed, when = self._stop_line
+            if now - when <= 0.3:                             # 앱에는 한 줄로 — 정지선 판정을 합쳐서 보냄
+                event = "STOP_LINE" if confirmed else event
+                raw = "STOP_LINE" if detected or confirmed else raw
+            self.send(format_dev("LINE", round(msg.offset, 2), event, raw, angle))
+
+    def on_stop_line(self, msg):
+        self._stop_line = (bool(msg.detected), bool(msg.confirmed), time.monotonic())
 
     def on_image(self, msg: Image):
         self.streamer.update(msg.encoding, msg.height, msg.width, msg.step, msg.data)
