@@ -31,6 +31,8 @@ class StopLineNode(Node):
             max_tilt_deg=p("max_tilt_deg", d.max_tilt_deg).value,
             edge_ratio=p("edge_ratio", d.edge_ratio).value,
             confirm_frames=p("confirm_frames", d.confirm_frames).value,
+            hold_frames=p("hold_frames", d.hold_frames).value,
+            hold_max_thick=p("hold_max_thick", d.hold_max_thick).value,
         )
         self.detector = StopLineDetector(cfg)
         self.offset = 0.0                         # 마지막 라인 오프셋 (라인 노드와 프레임이 조금 어긋나도 판정엔 지장 없음)

@@ -7,6 +7,7 @@
   열마다  : 가장 긴 세로 구간이 두께 ≥ 라인 굵기 × min_thickness, 관심 영역 맨 위·맨 아래에 닿지 않음
             (위에 닿으면 아직 들어오는 중, 아래에 닿으면 곡선의 대각선 라인일 수 있음)
   라인 위치: 위나 아래에 닿는 열 묶음이 곧 라인 — 정지선이 가까운 띠에 들어오면 오프셋이 끌려가므로 오프셋은 덩어리 고르는 데만 씀
+            단 판정 직후에는 아래로 나가는 구간도 인정 — 지연·관성으로 지나쳐 멈춰도 판정이 사라지지 않게
   전체    : 그런 열이 라인 왼쪽·오른쪽에 모두 이어지고, 폭이 라인 굵기의 width_ratio배, 화면 양끝에 모두 닿지 않음(T자 제외),
             기울기 ≤ max_tilt_deg
 검정 추출은 line_detect.black_mask를 그대로 쓴다. 같은 판정이 confirm_frames번 쌓이면 확정(한 프레임 빠짐 허용).
@@ -24,7 +25,7 @@ from agv_vision.line_detect import EventConfirmer, _spans, black_mask
 class StopLineConfig:
     width: int = 320
     height: int = 240
-    roi_ratio: float = 0.33             # line_node와 같은 관심 영역
+    roi_ratio: float = 0.5              # 라인(1/3)보다 넓게 — 일찍 잡아야 지연·관성으로 지나쳐도 영역 안에서 멈춤
     black_ratio: float = 0.72           # 이하 4개는 line_detect.LineConfig와 같은 뜻
     black_v_max: int = 170
     black_s_max: int = 90
@@ -38,6 +39,8 @@ class StopLineConfig:
     max_tilt_deg: float = 35.0          # 이보다 기울면 정지선 아님 (대각선 라인)
     edge_ratio: float = 0.05            # 화면 양끝 몇 % 안에 닿으면 "끝까지"
     confirm_frames: int = 3
+    hold_frames: int = 20               # 판정 후 이 프레임 동안은 관심 영역 아래로 나가는 정지선도 인정 (지연·관성으로 지나쳐 멈춤)
+    hold_max_thick: float = 2.5         # 그때 아래에 닿는 구간 두께 상한 (라인 굵기 배수) — 넘으면 라인으로 봄
 
 
 @dataclass
@@ -57,6 +60,7 @@ class StopLineDetector:
     def __init__(self, cfg: StopLineConfig | None = None):
         self.cfg = cfg or StopLineConfig()
         self.confirm = EventConfirmer(self.cfg.confirm_frames, tolerant={LineEvent.STOP_LINE})
+        self.hold = 0                                 # 남은 "아래로 나가도 인정" 프레임
 
     def set_frames(self, frames: int) -> None:
         """노트북 앱 "확인 프레임" (DEV TUNE CONFIRM)."""
@@ -67,7 +71,8 @@ class StopLineDetector:
         c = self.cfg
         img = cv2.resize(bgr, (c.width, c.height), interpolation=cv2.INTER_AREA)
         mask = black_mask(img[int(c.height * (1 - c.roi_ratio)):, :], c)
-        found, angle = self._find(mask, (offset + 1) * c.width / 2)
+        found, angle = self._find(mask, (offset + 1) * c.width / 2, self.hold > 0)
+        self.hold = c.hold_frames if found else max(0, self.hold - 1)
         event = LineEvent.STOP_LINE if found else LineEvent.NONE
         confirmed = self.confirm.push(event) == LineEvent.STOP_LINE
         return StopLineResult(found, confirmed, round(angle, 1))
@@ -84,7 +89,7 @@ class StopLineDetector:
                     widths.append(b - a + 1)
         return float(np.median(widths)) if widths else float(c.default_line_px)
 
-    def _find(self, mask: np.ndarray, line_x: float) -> tuple[bool, float]:
+    def _find(self, mask: np.ndarray, line_x: float, holding: bool = False) -> tuple[bool, float]:
         c = self.cfg
         h, w = mask.shape
         line_px = self._line_px(mask, line_x)
@@ -103,14 +108,17 @@ class StopLineDetector:
             run = _longest_run(comp[:, x])
             if not run:
                 continue
-            if run[0] == 0 or run[1] == h - 1:
+            thick = run[1] - run[0] + 1
+            if run[0] == 0 or (run[1] == h - 1 and not (holding and thick <= c.hold_max_thick * line_px)):
                 touch[x] = True
-            elif run[1] - run[0] + 1 >= need:
+            elif thick >= need:
                 centers[x] = (run[0] + run[1]) / 2
 
         blocks = _spans(touch)
-        if not blocks:
+        if not blocks and not holding:
             return False, 0.0
+        if not blocks:                                # 라인이 정지선에서 끝나고 아래로 나가는 중 — 오프셋 위치를 라인으로
+            blocks = [(int(line_x - line_px / 2), int(line_x + line_px / 2))]
         merged = [list(blocks[0])]                    # 기운 라인은 정지선 위·아래 부분이 따로 묶임 → 가까우면 하나로
         for a, b in blocks[1:]:
             if a - merged[-1][1] <= line_px:

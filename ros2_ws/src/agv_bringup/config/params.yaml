@@ -65,7 +65,7 @@ line_node:
 
 stop_line_node:
   ros__parameters:
-    roi_ratio: 0.33             # line_node와 같게
+    roi_ratio: 0.5              # 아래 1/2 (y120~) — 라인보다 넓게, 일찍 잡아 지나쳐 멈춰도 영역 안
     black_ratio: 0.72           # line_node와 같게
     black_v_max: 170
     black_s_max: 90
@@ -76,6 +76,7 @@ stop_line_node:
     max_tilt_deg: 35.0          # 이보다 기울면 정지선 아님
     gap_cols: 3                 # 테이프 반사로 이만큼 끊겨도 이어진 것으로 봄
     confirm_frames: 3           # 노트북 앱 "확인 프레임"으로 조정
+    hold_frames: 20             # 판정 후 이 프레임 동안 아래로 나가는 정지선도 인정
 
 drive_node:
   ros__parameters:

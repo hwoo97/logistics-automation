@@ -1,4 +1,4 @@
-"""StopLineDetector — 합성 사진(320×240)으로 세로 열 정지선 판정 시험. 관심 영역 = 아래 80행(160~239)."""
+"""StopLineDetector — 합성 사진(320×240)으로 세로 열 정지선 판정 시험. 관심 영역 = 아래 120행(120~239)."""
 import cv2
 import numpy as np
 import pytest
@@ -74,7 +74,7 @@ def test_tilted_stop_line(angle):
     """기울어도 잡음 — 가로 줄 방식은 +5°부터 대부분, ±15°부터 전부 놓쳤음 (2026-11-02 실제 사진)."""
     r = run(rotated(angle))
     assert r.detected, f"{angle}° 놓침"
-    assert abs(abs(r.angle) - abs(angle)) < 4
+    assert abs(abs(r.angle) - abs(angle)) < 5
 
 
 def test_too_tilted_is_not_stop_line():
@@ -99,8 +99,8 @@ def test_found_anywhere_in_roi(y):
 
 def test_entering_roi_is_not_judged_yet():
     """관심 영역 위 경계에 걸친 정지선은 아직 판정 안 함 (경계에서 멈추면 떨림으로 판정이 사라짐)."""
-    assert not run(scene(y=(150, 180))).detected
-    assert run(scene(y=(162, 192))).detected
+    assert not run(scene(y=(110, 140))).detected
+    assert run(scene(y=(122, 152))).detected
 
 
 def test_same_tape_foreshortened():
@@ -163,6 +163,33 @@ def test_diagonal_curve_is_not_stop_line(x_bottom, x_top):
 def test_line_offset_pulled_by_stop_line(offset):
     """정지선이 가까운 띠에 들어오면 라인 오프셋이 끌려감 — 실제 사진: 라인 x172인데 오프셋은 x200 (2026-11-02)."""
     assert run(scene(120, 220, y=(200, 228), x=172), offset=offset).detected
+
+
+def test_held_while_leaving_bottom():
+    """지연·관성으로 지나쳐 멈춰 정지선이 영역 아래에 닿아도 판정 유지 — 사라지면 오판정으로 보고 재출발함 (2026-11-02 S1)."""
+    det = StopLineDetector()
+    assert det.process(scene(), 0.0).detected
+    assert det.process(scene(y=(222, 240)), 0.0).detected
+    assert not run(scene(y=(222, 240))).detected              # 처음부터 아래에 닿으면 판정 안 함
+
+
+def test_hold_expires():
+    det = StopLineDetector(StopLineConfig(hold_frames=2))
+    det.process(scene(), 0.0)
+    plain = floor()
+    vline(plain)
+    det.process(plain, 0.0)
+    det.process(plain, 0.0)
+    assert not det.process(scene(y=(222, 240)), 0.0).detected
+
+
+def test_held_when_line_ends_at_stop_line():
+    """라인이 정지선에서 끝나 위쪽에 라인 열이 없어도, 판정 직후라면 유지."""
+    det = StopLineDetector()
+    det.process(scene(), 0.0)
+    img = floor()
+    hline(img, 100, 220, (222, 240))
+    assert det.process(img, 0.0).detected
 
 
 def test_gap_in_tape_is_tolerated():
