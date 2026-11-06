@@ -4,9 +4,10 @@
 라인이 수직(90°)인 팬 = 정면을 찾음 (agv_hw.calibration) → cal_file에 저장, 모든 자세의 팬을 정면값으로.
 "RESET" → 저장값 지우고 params의 자세 각도로. 진행·결과는 /pantilt/calibration
 ("RUNNING <팬> <라인 각도>", "DONE <팬>", "FAIL <이유>", "RESET <LINE 팬>", "CANCELLED").
+SIGN 자세 틸트 저장 (2026-11-06): "SIGN <틸트>" → cal_file에 저장, SIGN 자세로 움직이고 "SIGN <틸트>" 보고.
+앱 개발자 탭에서 틸트 슬라이더로 표지판이 보이는 각도를 찾은 뒤 저장 (빌드 없이). RESET이면 같이 지움.
 line_node가 돌고 있어야 함 (s1_line.launch.py 또는 agv.launch.py).
 """
-import json
 import os
 import time
 
@@ -15,23 +16,8 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Float32MultiArray, String
 
-from agv_hw.calibration import PanCalibrator
+from agv_hw.calibration import PanCalibrator, load_cal, save_cal
 from agv_protocol.types import Pose
-
-
-def load_front(path: str) -> float | None:
-    try:
-        with open(path, encoding="utf-8") as fp:
-            value = json.load(fp).get("pan_front")
-        return float(value) if value is not None else None
-    except (OSError, ValueError, AttributeError, TypeError):
-        return None
-
-
-def save_front(path: str, pan: float) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fp:
-        json.dump({"pan_front": pan, "saved": time.strftime("%Y-%m-%d %H:%M:%S")}, fp, ensure_ascii=False, indent=2)
 
 
 class PanTiltNode(Node):
@@ -43,9 +29,10 @@ class PanTiltNode(Node):
         self.tilt_ch = p("tilt_channel", 1).value
         self.settle_s = p("settle_s", 0.3).value
         self.base_poses = {pose.value: list(p(f"poses.{pose.value}", default).value)
-                           for pose, default in ((Pose.LINE, [70, 130]), (Pose.JUNCTION, [65, 165]), (Pose.SIGN, [65, 180]))}
+                           for pose, default in ((Pose.LINE, [70, 130]), (Pose.JUNCTION, [65, 165]), (Pose.SIGN, [65, 165]))}
         self.cal_file = os.path.expanduser(p("cal_file", "~/.agv/pantilt_cal.json").value)
-        self.front = load_front(self.cal_file)
+        cal = load_cal(self.cal_file)
+        self.front, self.sign_tilt = cal["pan_front"], cal["sign_tilt"]
         bus, address = p("i2c_bus", 1).value, p("address", 0x40).value
         oe, chip = p("oe_pin", 17).value, p("gpio_chip", -1).value
         if fake:
@@ -78,10 +65,17 @@ class PanTiltNode(Node):
 
     @property
     def poses(self) -> dict:
-        """자세별 [팬, 틸트]. 정면 맞춤값이 있으면 모든 자세의 팬 = 정면 (틸트는 params 그대로)."""
-        if self.front is None:
-            return self.base_poses
-        return {name: [self.front, tilt] for name, (_, tilt) in self.base_poses.items()}
+        """자세별 [팬, 틸트]. 정면 맞춤값이 있으면 모든 자세의 팬 = 정면, SIGN 틸트 저장값이 있으면 SIGN 틸트 = 저장값."""
+        out = {name: [self.front if self.front is not None else pan, tilt] for name, (pan, tilt) in self.base_poses.items()}
+        if self.sign_tilt is not None:
+            out[Pose.SIGN.value][1] = self.sign_tilt
+        return out
+
+    def _save(self):
+        try:
+            save_cal(self.cal_file, self.front, self.sign_tilt)
+        except OSError as e:
+            self.get_logger().error(f"팬틸트 저장 실패: {e}")
 
     def move(self, pan, tilt, name):
         self.pan, self.tilt = float(pan), float(tilt)
@@ -123,7 +117,20 @@ class PanTiltNode(Node):
             self._report("CANCELLED")
 
     def on_calibrate(self, msg: String):
-        cmd = msg.data.strip().upper()
+        parts = msg.data.strip().upper().split()
+        cmd = parts[0] if parts else ""
+        if cmd == "SIGN" and len(parts) == 2:
+            try:
+                tilt = max(0.0, min(180.0, float(parts[1])))
+            except ValueError:
+                self.get_logger().warn(f"/pantilt/calibrate SIGN 각도 오류 ({msg.data!r})")
+                return
+            self._cancel_cal()
+            self.sign_tilt = tilt
+            self._save()
+            self.move(*self.poses[Pose.SIGN.value], name=Pose.SIGN.value)
+            self._report(f"SIGN {tilt:.0f}")
+            return
         if cmd == "AUTO":
             if not self.has_line:
                 self._report("FAIL agv_interfaces 없음 — 라인 상태를 받을 수 없음")
@@ -137,7 +144,7 @@ class PanTiltNode(Node):
             self._report(f"RUNNING {step.pan:.1f} -")
         elif cmd == "RESET":
             self._cancel_cal()
-            self.front = None
+            self.front = self.sign_tilt = None
             try:
                 os.remove(self.cal_file)
             except OSError:
@@ -145,7 +152,7 @@ class PanTiltNode(Node):
             self.move(*self.poses[Pose.LINE.value], name=Pose.LINE.value)
             self._report(f"RESET {self.poses[Pose.LINE.value][0]:.1f}")
         else:
-            self.get_logger().warn(f"/pantilt/calibrate: AUTO 또는 RESET ({msg.data!r})")
+            self.get_logger().warn(f"/pantilt/calibrate: AUTO, RESET 또는 SIGN <틸트> ({msg.data!r})")
 
     def on_line(self, msg):
         if not self.cal.active:
@@ -174,10 +181,7 @@ class PanTiltNode(Node):
             self._report(f"RUNNING {step.pan:.1f} {step.angle:.1f}")
         elif step.action == "DONE":
             self.front = step.pan
-            try:
-                save_front(self.cal_file, step.pan)
-            except OSError as e:
-                self.get_logger().error(f"정면 맞춤 저장 실패: {e}")
+            self._save()
             self.move(*self.poses[Pose.LINE.value], name=Pose.LINE.value)
             self._report(f"DONE {step.pan:.1f}")
         elif step.action == "FAIL":

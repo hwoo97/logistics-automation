@@ -241,3 +241,13 @@ def test_calibration_only_when_idle(core):
     c.on_line("MANUAL ON")
     c.on_line("DEV CAL AUTO")
     assert io.replies("NAK")[-1]["command"] == "DEV CAL" and ("calibrate", "AUTO") not in io.calls
+
+
+def test_dev_cal_sign_tilt_goes_to_pantilt(core):
+    """DEV CAL SIGN 165 — 표지판 볼 때 틸트를 Pi에 저장 (2026-11-06)."""
+    c, io = core
+    c.on_line("DEV CAL sign 165")
+    assert ("calibrate", "SIGN 165") in io.calls
+    c.on_calibration("SIGN 165")
+    r = io.replies("DEV")[-1]
+    assert r["kind"] == "CAL" and r["state"] == "SIGN" and r["detail"] == "165"

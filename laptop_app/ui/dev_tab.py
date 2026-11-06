@@ -63,6 +63,7 @@ class DevTab(ttk.Frame):
         cal.grid(row=3, column=0, columnspan=3, sticky="w", padx=2, pady=(2, 4))
         ttk.Button(cal, text="정면 자동 맞춤", command=lambda: self._calibrate("AUTO")).pack(side="left")
         ttk.Button(cal, text="초기화", width=6, command=lambda: self._calibrate("RESET")).pack(side="left", padx=2)
+        ttk.Button(cal, text="틸트 → SIGN 저장", command=self._save_sign_tilt).pack(side="left", padx=(6, 0))
         self.cal_lbl = ttk.Label(pt, text="곧은 라인 위에 똑바로 놓고 누름 (line_node 필요)", foreground="gray")
         self.cal_lbl.grid(row=4, column=0, columnspan=3, sticky="w", padx=2)
 
@@ -84,7 +85,17 @@ class DevTab(ttk.Frame):
         if self.send("DEV", "CAL", action):
             self.cal_lbl.config(text="정면 맞추는 중…" if action == "AUTO" else "초기화 중…", foreground="#f57c00")
 
+    def _save_sign_tilt(self):
+        """지금 틸트 슬라이더 값을 SIGN 자세 틸트로 Pi에 저장 (DEV CAL SIGN <틸트>) — 표지판이 화면 가운데 오게 맞춘 뒤 누름."""
+        tilt = int(round(self.tilt.get()))
+        if self.send("DEV", "CAL", "SIGN", tilt):
+            self.cal_lbl.config(text=f"SIGN 틸트 {tilt}° 저장 중…", foreground="#f57c00")
+
     def _on_cal(self, state: str, detail: str):
+        if state == "SIGN":
+            self.cal_lbl.config(text=f"SIGN 자세 틸트 = {detail}° (Pi에 저장, 표지판 볼 때 사용)", foreground="#2e7d32")
+            self.log("SYS", f"SIGN 틸트 {detail}° 저장")
+            return
         if state == "RUNNING":
             pan, _, angle = detail.partition(" ")
             text, color = f"맞추는 중: 팬 {pan}°  라인 {angle}°", "#f57c00"
@@ -95,7 +106,7 @@ class DevTab(ttk.Frame):
             except ValueError:
                 pass
         elif state == "RESET":
-            text, color = f"초기화 — params 각도 사용 (LINE 팬 {detail}°)", "black"
+            text, color = f"초기화 — params 각도 사용 (LINE 팬 {detail}°, SIGN 틸트도 기본값)", "black"
         elif state == "CANCELLED":
             text, color = "정면 맞춤 취소 (다른 자세 명령)", "black"
         else:

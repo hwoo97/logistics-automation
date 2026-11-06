@@ -131,7 +131,7 @@ class BtBridgeNode(Node):
             self.pub_tune.publish(String(data=f"{key} {float(value)}"))
 
     def calibrate(self, action):
-        """DEV CAL — 카메라 팬 정면 자동 맞춤(AUTO)·저장값 지우기(RESET) → pantilt_node."""
+        """DEV CAL — 카메라 팬 정면 자동 맞춤(AUTO)·저장값 지우기(RESET)·SIGN 틸트 저장(SIGN 165) → pantilt_node."""
         self.pub_calibrate.publish(String(data=action))
 
     def target(self, color):

@@ -52,7 +52,7 @@ TUNE_RANGES = {"TURN": (0.1, 1.5),      # DEV TUNE — 회전 세기 (회전량 
                "CONFIRM": (1, 10),      #            정지선·코너 확정 프레임 수 (정수)          → line_node
                "LINE_END": (3, 30)}     #            라인 끝 확정 프레임 수 (정수)              → line_node
 TUNE_INT_KEYS = ("CONFIRM", "LINE_END")
-CAL_ACTIONS = ("AUTO", "RESET")                 # DEV CAL — 팬 정면 자동 맞춤 시작, 저장값 지우기 (pantilt_node)
+CAL_ACTIONS = ("AUTO", "RESET", "SIGN")         # DEV CAL — 팬 정면 자동 맞춤 시작, 저장값 지우기, SIGN <틸트> 저장 (pantilt_node)
 LINE_TUNE_KEYS = ("CONFIRM", "LINE_END")       # 브리지가 /line/tune으로, 나머지는 /drive/tune으로
 
 
@@ -133,9 +133,14 @@ def _validate_dev(cmd: Command) -> None:
         if rest:
             raise ValueError("DEV NODES: 인자 없음")
     elif sub == "CAL":
-        if len(rest) != 1 or rest[0].upper() not in CAL_ACTIONS:
-            raise ValueError(f"DEV CAL: {'/'.join(CAL_ACTIONS)} 중 하나")
-        cmd.args[1] = rest[0].upper()
+        act = rest[0].upper() if rest else ""
+        if act == "SIGN":                       # DEV CAL SIGN <틸트 0~180> — 표지판 볼 때 틸트를 Pi에 저장
+            if len(rest) != 2:
+                raise ValueError("DEV CAL SIGN <틸트 0~180>")
+            _number(rest[1], 0, 180, "DEV CAL SIGN")
+        elif len(rest) != 1 or act not in CAL_ACTIONS:
+            raise ValueError("DEV CAL: AUTO / RESET / SIGN <틸트> 중 하나")
+        cmd.args[1] = act
     else:
         raise ValueError(f"DEV: 알 수 없는 하위 명령 ({sub})")
 
@@ -300,7 +305,7 @@ def parse_reply(line: str) -> dict:
                 return {"type": "DEV", "kind": kind, "state": rest[1], "result": " ".join(rest[2:])}
             if kind == "NODES":
                 return {"type": "DEV", "kind": kind, "nodes": rest[1].split(",") if len(rest) > 1 else []}
-            if kind == "CAL":                   # DEV CAL <RUNNING 팬 각도|-|DONE 팬|FAIL 이유|RESET 팬|CANCELLED>
+            if kind == "CAL":                   # DEV CAL <RUNNING 팬 각도|-|DONE 팬|FAIL 이유|RESET 팬|CANCELLED|SIGN 틸트>
                 return {"type": "DEV", "kind": kind, "state": rest[1], "detail": " ".join(rest[2:])}
     except (IndexError, ValueError) as e:
         raise ValueError(f"형식 오류: {line!r} ({e})") from None

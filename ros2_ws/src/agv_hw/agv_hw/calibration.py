@@ -6,6 +6,9 @@
      → 기울기로 90°가 될 팬을 계산해 옮김 → 다시 재서 90° ± tolerance_deg 안이면 끝, 아니면 반복.
 입력은 라인 상태(각도·유효 여부)와 시각, 출력은 Step(동작, 팬, 이유) — 서보·ROS는 pantilt_node가 맡는다.
 """
+import json
+import os
+import time
 from dataclasses import dataclass
 
 
@@ -104,3 +107,30 @@ class PanCalibrator:
         if abs(move) < 0.5:
             move = 0.5 if move > 0 else -0.5              # 서보 최소 단위보다 작으면 0.5°는 움직임
         return self._move(self.pan + move, now)
+
+
+# ── 저장 파일 (~/.agv/pantilt_cal.json) — 팬 정면, SIGN 자세 틸트 (2026-11-06) ──
+
+def load_cal(path: str) -> dict:
+    """{"pan_front": 팬 정면 또는 None, "sign_tilt": SIGN 틸트 또는 None}. 파일이 없거나 깨졌으면 둘 다 None."""
+    out = {"pan_front": None, "sign_tilt": None}
+    try:
+        with open(path, encoding="utf-8") as fp:
+            data = json.load(fp)
+    except (OSError, ValueError):
+        return out
+    if not isinstance(data, dict):
+        return out
+    for key in out:
+        try:
+            out[key] = float(data[key]) if data.get(key) is not None else None
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def save_cal(path: str, pan_front: float | None, sign_tilt: float | None) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fp:
+        json.dump({"pan_front": pan_front, "sign_tilt": sign_tilt, "saved": time.strftime("%Y-%m-%d %H:%M:%S")},
+                  fp, ensure_ascii=False, indent=2)

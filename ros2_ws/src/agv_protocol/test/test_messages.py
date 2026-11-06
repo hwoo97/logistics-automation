@@ -183,10 +183,12 @@ def test_uturn_only_starts_in_idle():
 
 
 @pytest.mark.parametrize("line, ok", [("DEV CAL AUTO", True), ("DEV CAL reset", True), ("DEV CAL", False),
-                                      ("DEV CAL PAN", False), ("DEV CAL AUTO 1", False)])
+                                      ("DEV CAL PAN", False), ("DEV CAL AUTO 1", False),
+                                      ("DEV CAL SIGN 165", True), ("DEV CAL sign 170.5", True), ("DEV CAL SIGN", False),
+                                      ("DEV CAL SIGN 200", False), ("DEV CAL SIGN abc", False)])
 def test_dev_cal(line, ok):
     if ok:
-        assert parse_command(line).args[1] in ("AUTO", "RESET")
+        assert parse_command(line).args[1] in ("AUTO", "RESET", "SIGN")
     else:
         with pytest.raises(ValueError):
             parse_command(line)

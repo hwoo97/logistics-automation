@@ -96,3 +96,29 @@ def test_reports_each_measurement():
     measured = [s for s in steps if s.action == "MEASURED"]
     assert measured[0].pan == 70 and measured[0].angle == pytest.approx(84.0)
     assert len(measured) >= 2
+
+
+# ── 저장 파일 ──
+
+def test_cal_file_round_trip(tmp_path):
+    from agv_hw.calibration import load_cal, save_cal
+    p = str(tmp_path / "sub" / "cal.json")
+    assert load_cal(p) == {"pan_front": None, "sign_tilt": None}
+    save_cal(p, 66.0, None)
+    assert load_cal(p) == {"pan_front": 66.0, "sign_tilt": None}
+    save_cal(p, 66.0, 160.0)
+    assert load_cal(p) == {"pan_front": 66.0, "sign_tilt": 160.0}
+
+
+def test_cal_file_old_format_and_broken(tmp_path):
+    """#119 형식(pan_front만)도 읽고, 깨진 파일은 둘 다 None."""
+    from agv_hw.calibration import load_cal
+    old = tmp_path / "old.json"
+    old.write_text('{"pan_front": 67.5, "saved": "x"}', encoding="utf-8")
+    assert load_cal(str(old)) == {"pan_front": 67.5, "sign_tilt": None}
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert load_cal(str(bad)) == {"pan_front": None, "sign_tilt": None}
+    weird = tmp_path / "weird.json"
+    weird.write_text('{"pan_front": "abc", "sign_tilt": 150}', encoding="utf-8")
+    assert load_cal(str(weird)) == {"pan_front": None, "sign_tilt": 150.0}

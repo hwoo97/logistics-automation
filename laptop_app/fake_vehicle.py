@@ -21,7 +21,7 @@ from agv_protocol.messages import (
     format_nak, format_pong, format_status, parse_command,
 )
 
-POSES = {"LINE": (70, 130), "JUNCTION": (65, 165), "SIGN": (65, 180)}
+POSES = {"LINE": (70, 130), "JUNCTION": (65, 165), "SIGN": (65, 165)}
 FAKE_NODES = ["camera", "line_node", "marker_node", "classifier_node", "drive_node", "mission_node",
               "motor_node", "pantilt_node", "ultrasonic_node", "led_node", "segment_node", "bt_bridge_node"]
 FAKE_TRACK = {"red": "DROP_A", "green": "DROP_B", "blue": "WORK", "yellow": "PARK"}   # 가짜 트랙의 실제 배치
@@ -224,7 +224,10 @@ class FakeVehicle:
         elif sub == "NODES":
             self.send(format_dev("NODES", FAKE_NODES))
         elif sub == "CAL":                                       # 정면 자동 맞춤 흉내 — 70° → 66°
-            if rest[0] == "AUTO":
+            if rest[0] == "SIGN":                                 # SIGN 틸트 저장 흉내
+                self.pan, self.tilt = self.pan, float(rest[1])
+                self.send(format_dev("CAL", "SIGN", int(float(rest[1]))))
+            elif rest[0] == "AUTO":
                 for pan, angle in ((70.0, 84.0), (73.0, 79.5), (66.5, 89.2), (66.0, 90.0)):
                     self.send(format_dev("CAL", "RUNNING", pan, angle))
                 self.pan = 66.0

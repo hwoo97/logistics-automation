@@ -67,7 +67,7 @@
 | `DEV SPEED <v>` | `DEV SPEED 0.7` | 라인 주행 기본 속도 (0.2~1.0) — drive_node에 바로 적용, 주행 중에도 | `/drive/speed` | 모든 상태 |
 | `DEV WATCH <RANGE\|LINE\|SYS\|ALL> <ON\|OFF>` | `DEV WATCH RANGE ON` | 측정값 보내기 켜기/끄기 (연결 끊기면 모두 꺼짐) | — | 모든 상태 |
 | `DEV NODES` | `DEV NODES` | 실행 중인 ROS 노드 목록 요청 | — | 모든 상태 |
-| `DEV CAL <AUTO\|RESET>` | `DEV CAL AUTO` | 카메라 팬 정면 자동 맞춤(곧은 라인 위에서, line_node 필요) / 저장값 지우기. 결과는 `DEV CAL …` | `/pantilt/calibrate` | IDLE |
+| `DEV CAL <AUTO\|RESET\|SIGN 틸트>` | `DEV CAL SIGN 160` | 카메라 팬 정면 자동 맞춤(곧은 라인 위에서, line_node 필요) / 저장값(정면·SIGN 틸트) 지우기 / SIGN 자세 틸트 저장(0~180, 2026-11-06). 결과는 `DEV CAL …` | `/pantilt/calibrate` | IDLE |
 
 **Pi → 노트북** (켠 항목만, 5Hz 이하)
 | 메시지 | 예시 | 의미 |
@@ -77,7 +77,7 @@
 | `DEV LINE <offset> <event> [<raw_event> [<angle>]]` | `DEV LINE -0.12 NONE STOP_LINE 87.5` | 라인 오프셋(-1~1), 확정 이벤트, 이번 프레임 판정(확인 전, 생략 시 event와 같음), 라인 각도(도, 90 = 똑바로, 못 믿으면 `-`) — `/line/state` |
 | `DEV SYS <temp_c> <cpu_pct> <mem_pct>` | `DEV SYS 52.1 37 41` | Pi CPU 온도·사용률·메모리 (1Hz) |
 | `DEV NODES <이름,...>` | `DEV NODES camera,led_node,motor_node` | `DEV NODES` 응답 |
-| `DEV CAL <RUNNING 팬 각도\|DONE 팬\|FAIL 이유\|RESET 팬\|CANCELLED>` | `DEV CAL DONE 66.0` | 정면 자동 맞춤 진행·결과 (`/pantilt/calibration`) |
+| `DEV CAL <RUNNING 팬 각도\|DONE 팬\|FAIL 이유\|RESET 팬\|CANCELLED\|SIGN 틸트>` | `DEV CAL DONE 66.0` | 정면 자동 맞춤 진행·결과, SIGN 틸트 저장 결과 (`/pantilt/calibration`) |
 
 - `DEV` 명령의 수신 결과는 `ACK DEV <하위명령>` / `NAK DEV <하위명령> <이유>` (예: `NAK DEV WHEEL NAVIGATE 상태에서 불가`)
 - `mission_node`가 아직 없을 때(단위 개발 단계) 상태는 `IDLE`로 본다

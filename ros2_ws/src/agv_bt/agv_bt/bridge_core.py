@@ -161,7 +161,7 @@ class BridgeCore:
         elif sub == "NODES":
             self.io.send(format_dev("NODES", sorted(self.io.node_names())))
         elif sub == "CAL":
-            self.io.calibrate(rest[0])
+            self.io.calibrate(" ".join(rest))                      # AUTO / RESET / SIGN 165
 
     def on_calibration(self, text: str):
         """pantilt_node /pantilt/calibration → 앱 (DEV CAL RUNNING 66.0 87.5 / DONE 66.0 / FAIL 이유 …)."""
