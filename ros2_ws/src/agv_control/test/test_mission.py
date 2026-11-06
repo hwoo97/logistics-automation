@@ -23,14 +23,17 @@ class Reverse:
 class World:
     """동작을 받아 다음 이벤트를 돌려주는 가짜 차량·트랙. 차량은 처음에 대기장소 표지판 앞."""
 
-    def __init__(self, sm: MissionStateMachine, track=TRACK, sign_fail: int = 0):
+    def __init__(self, sm: MissionStateMachine, track=TRACK, sign_fail: int = 0, facing_sign: bool = True):
         self.sm, self.track, self.sign_fail = sm, track, sign_fail
+        self.facing_sign = facing_sign                  # 처음에 대기장소 표지판을 보고 있는지 (초음파 0.3m / 값 없음)
         self.at, self.color, self.now = "PARK", "NONE", 0.0
         self.log, self.digits, self.leds, self.reports, self.saved = [], [], [], [], None
         self.signs = []
         self.queue: list[Event] = []
 
     def send(self, kind, **data):
+        if kind in ("SETUP", "START"):                   # 출발 전 초음파 — 표지판을 보고 있으면 0.3m
+            self.queue.append(Event("RANGE", {"distance": 0.3 if self.facing_sign else None}))
         self.queue.append(Event(kind, data))
         return self.run()
 
@@ -96,6 +99,9 @@ def test_setup_maps_all_colors_and_returns_to_park():
     assert w.sm.state == State.PARKED and w.at == "PARK"
     assert w.sm.ctx.track_map == FULL and w.saved == FULL and w.sm.mapped
     assert [r for r in w.reports if r == "MAPPED"] == ["MAPPED"] * 4 and w.reports[-1] == "MAP_DONE"
+    # 빨강(DROP_A)·파랑(WORK)·초록(DROP_B)을 읽고 노랑(PARK)은 소거법 → 대기장소로 가서 확인
+    mapped = [d["detail"] for k, d in w.log if k == "REPORT" and d.get("event") == "MAPPED"]
+    assert mapped == ["DROP_A red", "WORK blue", "DROP_B green", "PARK yellow 소거"]
     assert w.digits[0] == "0" and w.digits[-1] == "0"           # 빈 차량은 0 (변경 시나리오)
     w.send("TICK", now=w.now + 5)
     assert w.sm.state == State.IDLE
@@ -108,14 +114,79 @@ def test_setup_returns_to_park_when_last_color_is_not_park():
     assert w.sm.ctx.track_map == {"PARK": "red", "DROP_B": "green", "WORK": "blue", "DROP_A": "yellow"}
     assert w.color == "NONE"                                     # 끝나면 목적지 색 해제
     follows = [d for k, d in w.log if k == "TARGET"]
-    assert [d["color"] for d in follows][:5] == ["red", "green", "blue", "yellow", "red"]
+    # 빨강·파랑·초록만 따라가고 노랑(DROP_A)은 소거법 → 대기장소(빨강)로 복귀. 노랑 지점은 가지 않음
+    assert [d["color"] for d in follows][:5] == ["red", "blue", "green", "red", "NONE"]
 
 
-def test_setup_rejects_wrong_start_position():
-    w = World(sm())
-    w.at = "WORK"
-    w.send("SETUP")
-    assert w.sm.state == State.ERROR and w.reports[-1] == "E_MAP"
+def test_setup_does_not_check_start_sign():
+    """2026-11-06: 출발할 때 표지판을 읽지 않음. 앞이 가까우면(표지판을 보고 있음) 유턴 → 빨강부터 따라감."""
+    m = sm()
+    m.handle(Event("RANGE", {"distance": 0.3}))
+    acts = m.handle(Event("SETUP"))
+    assert m.state == State.UTURN and not any(a.kind == "CLASSIFY" for a in acts)
+    assert [a.data["color"] for a in acts if a.kind == "TARGET"] == ["red"]
+    assert ("DRIVE", "UTURN") in kinds(acts)
+    assert [a.data["detail"] for a in acts if a.kind == "REPORT" and a.data.get("event") == "DEPART"] == ["UTURN 앞 0.30m"]
+
+
+@pytest.mark.parametrize("dist", [None, 0.8, 1.9])
+def test_setup_facing_away_starts_without_uturn(dist):
+    """처음 방향을 모름 — 앞이 멀거나 값이 없으면(바깥을 보고 있음) 유턴 없이 바로 라인을 따라감, 대기장소 정지선은 통과."""
+    m = sm()
+    m.handle(Event("RANGE", {"distance": dist}))
+    acts = m.handle(Event("SETUP"))
+    assert m.state == State.NAVIGATE and ("DRIVE", "UTURN") not in kinds(acts)
+    drive = [a for a in acts if a.kind == "DRIVE"][0]
+    assert drive.data == {"command": "FOLLOW_TO_EVENT", "skip": 1}
+    assert [a.data["color"] for a in acts if a.kind == "TARGET"] == ["red"]
+
+
+def test_setup_whole_run_facing_away():
+    w = World(sm(), facing_sign=False).send("SETUP")
+    assert w.sm.state == State.PARKED and w.sm.ctx.track_map == FULL
+    first_drive = [d for k, d in w.log if k == "DRIVE"][0]
+    assert first_drive["command"] == "FOLLOW_TO_EVENT"
+
+
+def test_work_start_facing_away_starts_without_uturn():
+    m = MissionStateMachine(track_map=FULL)
+    m.handle(Event("RANGE", {"distance": 1.2}))
+    acts = m.handle(Event("START", {"circle": 1, "square": 0}))
+    assert m.state == State.NAVIGATE and ("DRIVE", "UTURN") not in kinds(acts)
+
+
+def test_later_trips_always_uturn():
+    """출발 뒤의 이동(지점 → 다음 지점)은 늘 표지판 앞에서 시작하므로 유턴 (초음파와 상관없음)."""
+    w = World(sm(), facing_sign=False).send("SETUP")
+    drives = [d["command"] for k, d in w.log if k == "DRIVE"]
+    assert drives[0] == "FOLLOW_TO_EVENT" and drives.count("UTURN") >= 3
+
+
+def test_setup_order_red_blue_green_yellow_and_elimination_last():
+    """빨강→파랑→초록 순서로 세 곳을 읽으면 노랑은 소거법 — 노랑 지점은 가지 않음."""
+    w = World(sm()).send("SETUP")
+    follows = [d["color"] for k, d in w.log if k == "TARGET"]
+    assert follows[:3] == ["red", "blue", "green"] and "yellow" in follows[3:4]   # 넷째는 대기장소(노랑) 복귀
+    assert w.signs.count("sign_park 0.00") == 1                  # 대기장소 표지판은 복귀 때 한 번만 읽음
+
+
+def test_setup_park_found_early_still_eliminates_last():
+    """대기장소가 세 곳 안에 있으면 남은 하차·상차 지점이 소거법, 마지막으로 읽은 곳이 대기장소가 아니면 대기장소로 복귀."""
+    track = {"red": "WORK", "blue": "PARK", "green": "DROP_A", "yellow": "DROP_B"}
+    w = World(sm(), track).send("SETUP")
+    assert w.sm.state == State.PARKED and w.at == "PARK"
+    assert w.sm.ctx.track_map == {"WORK": "red", "PARK": "blue", "DROP_A": "green", "DROP_B": "yellow"}
+    mapped = [d["detail"] for k, d in w.log if k == "REPORT" and d.get("event") == "MAPPED"]
+    assert mapped[-1] == "DROP_B yellow 소거"
+
+
+def test_setup_third_is_park_finishes_there():
+    """셋째로 읽은 곳이 대기장소면 넷째를 소거법으로 채우고 그 자리에서 끝."""
+    track = {"red": "WORK", "blue": "DROP_A", "green": "PARK", "yellow": "DROP_B"}
+    w = World(sm(), track).send("SETUP")
+    assert w.sm.state == State.PARKED and w.at == "PARK"
+    follows = [d["color"] for k, d in w.log if k == "TARGET"]
+    assert follows == ["red", "blue", "green", "NONE"]
 
 
 def test_setup_duplicate_point_is_error():
@@ -143,7 +214,8 @@ def work(circle, square, **cfg):
 def test_work_circle_then_square_and_back():
     w = work(3, 2)
     assert w.sm.state == State.PARKED and w.at == "PARK"
-    assert [r for r in w.reports if r != "SIGN"] == ["STARTED", "LOADED", "UNLOADED", "LOADED", "UNLOADED", "PARKED"]
+    assert [r for r in w.reports if r not in ("SIGN", "DEPART")] == ["STARTED", "LOADED", "UNLOADED", "LOADED", "UNLOADED",
+                                                                    "PARKED"]
     assert w.digits == ["0", "1", "2", "3", "2", "1", "0", "1", "2", "1", "0", "0"]
     assert w.leds[1:] == ["RED", "OFF", "GREEN", "OFF", "OFF"] and w.sm.ctx.done == 5
     colors = [d["color"] for k, d in w.log if k == "TARGET"]
@@ -311,9 +383,10 @@ def test_status_fields():
     s = m.status()
     assert s["mode"] == "WORK" and s["total"] == 2 and s["map"] == FULL
     m2 = MissionStateMachine()
+    m2.handle(Event("RANGE", {"distance": 0.3}))
     m2.handle(Event("SETUP"))
     s = m2.status()
-    assert s["mode"] == "SETUP" and s["total"] == 4 and s["state"] == "CHECK_SIGN"
+    assert s["mode"] == "SETUP" and s["total"] == 4 and s["state"] == "UTURN" and s["target"] == "red"
 
 
 # ── 변경 시나리오 2026-11-03 ─────────────────────────────

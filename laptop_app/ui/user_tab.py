@@ -35,7 +35,7 @@ class UserTab(ttk.Frame):
         setup.pack(fill="x", pady=(0, 6))
         ttk.Button(setup, text="초기 설정 시작", command=lambda: self.send("SETUP")).grid(
             row=0, column=0, columnspan=2, sticky="w", padx=4, pady=4)
-        ttk.Label(setup, text="Start 표지판을 보고 세운 뒤 시작", foreground="gray").grid(
+        ttk.Label(setup, text="방향 상관없이 대기장소에 세움 · 넷째는 소거법", foreground="gray").grid(
             row=0, column=2, sticky="w", padx=4)
         self.map_lbl = {}
         for r, target in enumerate(MAP_ORDER, start=1):

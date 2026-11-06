@@ -284,7 +284,7 @@ class FakeVehicle:
                                      float(random.randint(20, 45)), 38.0))
 
     def _range(self, now):
-        if self.state in ("APPROACH", "CHECK_SIGN", "LOAD", "UNLOAD"):
+        if self.state in ("IDLE", "PARKED", "APPROACH", "CHECK_SIGN", "LOAD", "UNLOAD"):   # 대기장소 = 표지판 앞
             return 0.29 + random.uniform(-0.005, 0.005)      # 표지판 앞 약 30cm
         return 1.2 + 0.05 * math.sin(now) + random.uniform(-0.01, 0.01)
 

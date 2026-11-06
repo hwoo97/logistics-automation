@@ -7,7 +7,8 @@
   → NAVIGATE(유턴 뒤 첫 정지선 = 방금 지점의 정지선은 통과). 대기장소는 유턴 없이 끝.
 도착 시험 (TEST_ARRIVE, 노트북 앱 개발자 탭): 매핑 없이 지금 목적지 색으로 NAVIGATE → 위 도착 과정 → 분류 결과를
   EVENT ARRIVED로 알리고 카메라를 내린 뒤 IDLE (모델이 없어도 오류로 멈추지 않음). CANCEL = 진행 중 동작을 멈추고 IDLE.
-초기 설정: 출발 위치(대기장소) 표지판 확인 → 매핑에 없는 색을 하나씩 목적지 색으로 따라가 표지판을 읽어 저장 → 4색 끝나면 대기장소로.
+초기 설정 (2026-11-06): 출발 표지판은 읽지 않고 유턴 → 빨강·파랑·초록·노랑 순서로 따라가 표지판을 읽어 저장 →
+  세 곳을 읽으면 남은 한 곳(지점·색)은 소거법으로 저장 → 대기장소로 돌아가 표지판 확인 후 끝.
 작업: 먼저 운반할 물품은 무작위, 한 물품을 다 옮긴 뒤 다음 물품. 1회 최대 9개(넘으면 여러 번 왕복), 상차 지점에서 1초에 1개
 싣고 그 물품 하차 지점에서 1초에 1개 내림 → 끝나면 대기장소(Start)로. (교수 변경 시나리오 2026-11-03)
 """
@@ -19,12 +20,15 @@ from agv_protocol.types import (
 )
 
 TARGETS = (Target.WORK, Target.DROP_A, Target.DROP_B, Target.PARK)
+SETUP_ORDER = ("red", "blue", "green", "yellow")   # 초기 설정 탐색 순서 (2026-11-06 사용자 결정)
 
 
 @dataclass
 class MissionConfig:
     sign_distance: float = 0.30         # 표지판 앞 정지 거리(m) — 2026-11-06 사용자 결정 30cm (변경 시나리오는 "약 18cm")
     sign_settle_s: float = 1.0          # 멈추고 카메라 자세가 잡힌 뒤 이 시간 기다렸다 분류 (차체 흔들림 가라앉힘)
+    start_sign_distance: float = 0.5    # 출발(SETUP·START) 때 초음파가 이보다 가까우면 대기장소 표지판을 보고 있음 → 유턴부터
+                                        # (2026-11-06: 처음 차 방향을 모름). 멀거나 값이 없으면 유턴 없이 바로 라인을 따라감
     sign_hits: int = 3                  # 이만큼 연속 가까우면 정지 (초음파 튐 방지)
     approach_timeout_s: float = 10.0    # 정지선에서 표지판 앞까지 시간 제한 → E_APPROACH
     item_interval_s: float = 1.0        # 상차·하차 1개 간격
@@ -60,7 +64,7 @@ class MissionContext:
     cargo: Cargo = Cargo.NONE
     load: int = 0
     target: Target = Target.WORK                    # 작업 목적지
-    explore: str | None = None                      # 초기 설정: 지금 따라가는 색 (None = 출발 확인·복귀)
+    explore: str | None = None                      # 초기 설정: 지금 따라가는 색 (None = 대기장소로 복귀)
     track_map: dict = field(default_factory=dict)   # "WORK" → "blue"
     skip_stop_lines: int = 0                        # 다음 NAVIGATE에서 통과할 정지선
     retry: int = 0
@@ -70,6 +74,7 @@ class MissionContext:
     since: float = 0.0                              # APPROACH 시작·PARKED 시작 시각
     next_tick: float = 0.0                          # 다음 상차·하차 시각
     classify_at: float | None = None                # CHECK_SIGN: 이 시각에 분류 시작 (멈춘 뒤 sign_settle_s)
+    front_range: float | None = None                # 마지막 초음파 거리 (값 없음 = None) — 출발 방향 판단
     clear_since: float | None = None                # 장애물 해제 시작 시각
     resume_state: State | None = None               # ESTOP·ERROR·PAUSED 뒤 돌아갈 상태
     error: str = ""
@@ -139,16 +144,20 @@ class MissionStateMachine:
         c = self.ctx
         c.mode, c.plan, c.done, c.total, c.cargo, c.load = Mode.NONE, [], 0, 0, Cargo.NONE, 0
         c.explore, c.skip_stop_lines, c.resume_state, c.error = None, 0, None, ""
+        # front_range는 지우지 않음 — 센서 값이라 모드와 상관없이 마지막 값을 씀
         c.aiming = c.test = False
 
     def _setup(self) -> list[Action]:
-        """출발 위치(대기장소 표지판 앞)를 먼저 확인한 뒤 색 탐색. 이전 매핑은 지운다 (트랙이 바뀌었을 수 있음)."""
+        """초기 설정 (2026-11-06 변경): 출발 표지판은 확인하지 않고 바로 유턴 → 빨강·파랑·초록·노랑 순서로 따라가
+        표지판을 읽어 저장. 세 곳을 읽으면 남은 한 곳은 소거법으로 저장하고 대기장소로 돌아가 확인.
+        이전 매핑은 지운다 (트랙이 바뀌었을 수 있음)."""
         self._reset()
         c = self.ctx
         c.mode, c.total, c.track_map = Mode.SETUP, len(TARGETS), {}
+        c.explore = SETUP_ORDER[0]
         acts = [A("SAVE_MAP", track_map={}), A("DIGIT", char="0"), A("LED", state=LedState.OFF.value),
                 A("REPORT", event="SETUP_STARTED")]
-        return acts + self._check_sign()
+        return acts + self._trip(color=c.explore, depart=True)
 
     def _test_arrive(self) -> list[Action]:
         """도착 시험 — 목적지 색은 drive_node에 이미 정한 것(DEV TARGET)을 그대로 씀."""
@@ -176,7 +185,7 @@ class MissionStateMachine:
         c.mode, c.plan, c.total = Mode.WORK, plan, circle + square
         acts = [A("DIGIT", char="0"), A("LED", state=LedState.OFF.value),
                 A("REPORT", event="STARTED", detail=f"적 {circle} 녹 {square}")]
-        return acts + self._trip(Target.WORK)
+        return acts + self._trip(Target.WORK, depart=True)
 
     def make_plan(self, circle: int, square: int) -> list:
         """물품별 수량 → 1회 적재 목록. 먼저 운반할 물품은 무작위, 한 물품을 다 옮긴 뒤 다음, 1회 최대 9개."""
@@ -191,15 +200,25 @@ class MissionStateMachine:
 
     # ── 이동 ─────────────────────────────────────────────
 
-    def _trip(self, target: Target | None = None, color: str | None = None) -> list[Action]:
-        """카메라를 내리고 유턴 → 목적지 색을 따라감 (유턴 뒤 첫 정지선 통과)."""
+    def _trip(self, target: Target | None = None, color: str | None = None, depart: bool = False) -> list[Action]:
+        """카메라를 내리고 유턴 → 목적지 색을 따라감 (유턴 뒤 첫 정지선 통과).
+        depart(SETUP·START 첫 출발): 차 방향을 모르므로 초음파로 판단 — 앞이 start_sign_distance보다 가까우면
+        대기장소 표지판을 보고 있는 것 → 유턴, 아니면 이미 바깥을 보고 있음 → 유턴 없이 바로 따라감.
+        어느 쪽이든 대기장소 정지선은 지나감."""
+        c = self.ctx
         if target is not None:
-            self.ctx.target = target
-            color = self.ctx.track_map[target.value]
-        self.ctx.skip_stop_lines = 1
+            c.target = target
+            color = c.track_map[target.value]
+        c.skip_stop_lines = 1
+        acts = [A("POSE", pose=Pose.LINE.value), A("TARGET", color=color)]
+        if depart:
+            facing = c.front_range is not None and c.front_range <= self.cfg.start_sign_distance
+            seen = f"앞 {c.front_range:.2f}m" if c.front_range is not None else "앞 거리 없음"
+            acts.append(A("REPORT", event="DEPART", detail=f"{'UTURN' if facing else 'STRAIGHT'} {seen}"))
+            if not facing:
+                return acts + self._navigate()
         self.state = State.UTURN
-        return [A("POSE", pose=Pose.LINE.value), A("TARGET", color=color),
-                A("DRIVE", command=DriveCommand.UTURN.value, skip=0)]
+        return acts + [A("DRIVE", command=DriveCommand.UTURN.value, skip=0)]
 
     def _navigate(self) -> list[Action]:
         self.state = State.NAVIGATE
@@ -256,6 +275,7 @@ class MissionStateMachine:
 
     def _on_range(self, d: dict) -> list[Action]:
         dist, c, cfg = d.get("distance"), self.ctx, self.cfg
+        c.front_range = dist                                # 출발 방향 판단용 (값 없음도 그대로)
         if dist is None:
             return []
         if self.state == State.APPROACH and c.aiming:
@@ -326,20 +346,22 @@ class MissionStateMachine:
     def _arrive_setup(self, seen: Target) -> list[Action]:
         c = self.ctx
         acts = []
-        if c.explore is None and not c.track_map:          # 출발 위치 확인
-            if seen != Target.PARK:
-                return self._error("E_MAP", f"출발 위치가 대기장소가 아님 ({seen.value})")
-        elif c.explore is not None:
+        if c.explore is not None:
             known = c.track_map.get(seen.value)
             if known and known != c.explore:
                 return self._error("E_MAP", f"{seen.value}가 {known}·{c.explore} 두 색에서 나옴")
             c.track_map[seen.value] = c.explore
+            acts += [A("REPORT", event="MAPPED", detail=f"{seen.value} {c.explore}")]
+            if len(c.track_map) == len(TARGETS) - 1:        # 세 곳 읽음 → 남은 한 곳은 소거법
+                target = next(t.value for t in TARGETS if t.value not in c.track_map)
+                color = next(x for x in SETUP_ORDER if x not in c.track_map.values())
+                c.track_map[target] = color
+                acts += [A("REPORT", event="MAPPED", detail=f"{target} {color} 소거")]
             c.done = len(c.track_map)
-            acts += [A("SAVE_MAP", track_map=dict(c.track_map)),
-                     A("REPORT", event="MAPPED", detail=f"{seen.value} {c.explore}")]
-        elif seen != Target.PARK:                           # 4색 끝, 대기장소로 복귀 중
+            acts.insert(0, A("SAVE_MAP", track_map=dict(c.track_map)))
+        elif seen != Target.PARK:                           # 매핑 끝, 대기장소로 복귀 중
             return self._error("E_MAP", f"대기장소 대신 {seen.value}")
-        left = [color for color in COLORS if color not in c.track_map.values()]
+        left = [color for color in SETUP_ORDER if color not in c.track_map.values()]
         if left:
             c.explore = left[0]
             return acts + self._trip(color=c.explore)
