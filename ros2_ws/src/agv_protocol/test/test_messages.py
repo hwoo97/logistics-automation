@@ -2,13 +2,17 @@ import pytest
 
 from agv_protocol.messages import (
     Command, check_allowed, command_key, format_ack, format_command, format_dev, format_error,
-    format_event, format_nak, format_status, parse_command, parse_reply,
+    format_event, format_map, format_nak, format_status, parse_command, parse_reply,
 )
-from agv_protocol.types import Cargo, State, Target
+from agv_protocol.types import Cargo, Mode, State, Target
 
 
 @pytest.mark.parametrize("line, kind, args", [
-    ("START 3", "START", ["3"]),
+    ("START 3 2", "START", ["3", "2"]),
+    ("START 0 9", "START", ["0", "9"]),
+    ("START 12 5", "START", ["12", "5"]),
+    ("START 99 0", "START", ["99", "0"]),
+    ("setup", "SETUP", []),
     ("stop", "STOP", []),
     ("MANUAL on", "MANUAL", ["ON"]),
     ("MOVE 0.5 -0.2", "MOVE", ["0.5", "-0.2"]),
@@ -37,7 +41,7 @@ def test_parse_valid(line, kind, args):
 
 
 @pytest.mark.parametrize("line", [
-    "", "START", "START 0", "START 10", "START 2.5", "STOP 1", "MANUAL MAYBE", "MOVE 1.5 0",
+    "", "START", "START 3", "START 0 0", "START 100 1", "START 1 100", "START 2.5 1", "START 1 2 3", "SETUP 1", "STOP 1", "MANUAL MAYBE", "MOVE 1.5 0",
     "MOVE a b", "DEV", "DEV LED BLUE", "DEV SERVO 90", "DEV SERVO 200 90", "DEV WHEEL 0 0 0",
     "DEV WHEEL 2 0 0 0", "DEV WATCH RANGE", "DEV WATCH FOO ON", "DEV NODES x", "DEV FOO", "JUMP",
     "DEV SPEED", "DEV SPEED 0.1", "DEV SPEED 1.5", "DEV SPEED fast", "DEV SPEED 0.5 0.5",
@@ -54,15 +58,17 @@ def test_parse_invalid(line):
 def test_command_key():
     assert Command("DEV", ["LED", "RED"]).key == "DEV LED"
     assert Command("MANUAL", ["OFF"]).key == "MANUAL OFF"
-    assert Command("START", ["3"]).key == "START"
+    assert Command("START", ["3", "2"]).key == "START"
     assert command_key("dev led blue") == "DEV LED"
     assert command_key("FOO 1") == "FOO"
     assert command_key("") == ""
 
 
 @pytest.mark.parametrize("line, state, ok", [
-    ("START 3", "IDLE", True),
-    ("START 3", "NAVIGATE", False),
+    ("START 3 2", "IDLE", True),
+    ("START 3 2", "NAVIGATE", False),
+    ("SETUP", "IDLE", True),
+    ("SETUP", "NAVIGATE", False),
     ("STOP", "LOAD", True),
     ("RESUME", "ESTOP", True),
     ("RESUME", "IDLE", False),
@@ -94,20 +100,32 @@ def test_every_state_accepts_stop_and_ping():
 
 
 def test_format_command():
-    assert format_command("START", 3) == "START 3"
+    assert format_command("START", 3, 2) == "START 3 2"
+    assert format_command("SETUP") == "SETUP"
     assert format_command("MOVE", 0.5, -0.25) == "MOVE 0.5 -0.25"
     assert format_command("DEV", "WHEEL", 0.3, 0.3, 0.0, 0.0) == "DEV WHEEL 0.3 0.3 0 0"
     with pytest.raises(ValueError):
-        format_command("START", 12)
+        format_command("START", 120, 0)
 
 
 def test_status_roundtrip():
-    line = format_status(State.NAVIGATE, 1, 3, Cargo.CIRCLE, Target.DROP_A)
-    assert line == "STATUS NAVIGATE 1/3 CIRCLE DROP_A"
+    line = format_status(State.NAVIGATE, Mode.WORK, 1, 5, Cargo.CIRCLE, 3, Target.DROP_A)
+    assert line == "STATUS NAVIGATE WORK 1/5 CIRCLE 3 DROP_A"
     r = parse_reply(line)
-    assert r == {"type": "STATUS", "state": "NAVIGATE", "done": 1, "total": 3,
-                 "cargo": "CIRCLE", "target": "DROP_A"}
-    assert parse_reply(format_status("IDLE", 0, 0))["cargo"] == "NONE"
+    assert r == {"type": "STATUS", "state": "NAVIGATE", "mode": "WORK", "done": 1, "total": 5,
+                 "cargo": "CIRCLE", "load": 3, "target": "DROP_A"}
+    r = parse_reply(format_status("IDLE"))
+    assert (r["mode"], r["cargo"], r["load"], r["target"]) == ("NONE", "NONE", 0, "NONE")
+    assert parse_reply(format_status("NAVIGATE", "SETUP", 2, 4, target="green"))["target"] == "green"
+
+
+def test_map_roundtrip():
+    line = format_map({"WORK": "blue", "DROP_A": "red"})
+    assert line == "MAP WORK=blue DROP_A=red DROP_B=- PARK=-"
+    assert parse_reply(line) == {"type": "MAP", "map": {"WORK": "blue", "DROP_A": "red", "DROP_B": None, "PARK": None}}
+    for bad in ("MAP WORK=pink", "MAP HOME=red", "MAP WORK"):
+        with pytest.raises(ValueError):
+            parse_reply(bad)
 
 
 def test_event_error_ack_nak():
@@ -144,7 +162,7 @@ def test_dev_replies():
     assert parse_reply(format_dev("NODES", []))["nodes"] == []
 
 
-@pytest.mark.parametrize("line", ["", "HELLO", "STATUS IDLE", "DEV RANGE x", "DEV FOO 1"])
+@pytest.mark.parametrize("line", ["", "HELLO", "STATUS IDLE", "STATUS IDLE NONE 0/0 NONE", "DEV RANGE x", "DEV FOO 1"])
 def test_parse_reply_invalid(line):
     with pytest.raises(ValueError):
         parse_reply(line)

@@ -8,6 +8,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/LineState.msg"
   "msg/StopLineState.msg"
   "msg/MarkerState.msg"
+  "msg/Status.msg"
+  "msg/Command.msg"
+  "srv/Classify.srv"
   "action/Drive.action"
 )
 

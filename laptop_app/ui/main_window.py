@@ -56,7 +56,8 @@ class MainWindow:
         self._build_bar(fake, addr or self.cfg.get("bt_address", ""))
         self.tabs = ttk.Notebook(root)
         self.tabs.pack(fill="both", expand=True, padx=6, pady=(0, 6))
-        self.user = UserTab(self.tabs, self.send)
+        self.user = UserTab(self.tabs, self.send, on_map=self._save_map)
+        self.user.update_map(self.cfg.get("track_map", {}), save=False)   # 지난번 매핑 (차량과 연결되면 차량 값으로 갱신)
         self.dev = DevTab(self.tabs, self.send, self.send_line, tuning=self.cfg.get("drive_tuning"),
                           on_tuning=self._save_tuning)
         self.dev.get_latest_frame = lambda: self.video.latest
@@ -97,6 +98,12 @@ class MainWindow:
                                    activebackground="#b71c1c", font=("맑은 고딕", 13, "bold"),
                                    padx=14, command=self.estop)
         self.estop_btn.pack(side="right")
+
+    def _save_map(self, track_map: dict):
+        """트랙 매핑은 Pi와 GUI 양쪽에 저장 (변경 시나리오 2026-11-03)."""
+        if self.cfg.get("track_map") != track_map:
+            self.cfg["track_map"] = track_map
+            save_config(self.cfg)
 
     def _save_tuning(self, tuning: dict):
         if self.cfg.get("drive_tuning") != tuning:
@@ -289,6 +296,8 @@ class MainWindow:
             if r["state"] == "ESTOP" and self.last_state != "ESTOP":
                 self.dev.stop_wheels()
             self.last_state = r["state"]
+        elif t == "MAP":
+            self.user.update_map(r["map"])
         elif t == "EVENT":
             self.user.add_event(f"{r['event']} {r['detail']}".strip())
         elif t == "ERROR":

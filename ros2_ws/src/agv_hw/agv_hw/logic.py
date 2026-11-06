@@ -52,6 +52,21 @@ def led_output(state: str, blink_on: bool) -> tuple[bool, bool]:
     return False, False
 
 
+#        a  b  c  d  e  f  g
+SEGMENTS = {
+    "0": (1, 1, 1, 1, 1, 1, 0), "1": (0, 1, 1, 0, 0, 0, 0), "2": (1, 1, 0, 1, 1, 0, 1),
+    "3": (1, 1, 1, 1, 0, 0, 1), "4": (0, 1, 1, 0, 0, 1, 1), "5": (1, 0, 1, 1, 0, 1, 1),
+    "6": (1, 0, 1, 1, 1, 1, 1), "7": (1, 1, 1, 0, 0, 0, 0), "8": (1, 1, 1, 1, 1, 1, 1),
+    "9": (1, 1, 1, 1, 0, 1, 1), "-": (0, 0, 0, 0, 0, 0, 1), "E": (1, 0, 0, 1, 1, 1, 1),
+    " ": (0, 0, 0, 0, 0, 0, 0),
+}
+
+
+def segment_bits(char: str) -> tuple[int, ...] | None:
+    """7세그먼트 한 글자 → (a~g 켬 여부). 모르는 글자는 None (functional_design F13)."""
+    return SEGMENTS.get(char[:1] if char else " ")
+
+
 class Watchdog:
     """마지막 입력 후 timeout_s가 지나면 expired."""
 

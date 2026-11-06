@@ -62,7 +62,6 @@ class LedState(str, Enum):
 class State(str, Enum):           # 상태 머신 상태 (BT STATUS에 그대로 표시)
     IDLE = "IDLE"
     NAVIGATE = "NAVIGATE"
-    AT_JUNCTION = "AT_JUNCTION"
     CHECK_SIGN = "CHECK_SIGN"
     APPROACH = "APPROACH"
     LOAD = "LOAD"
@@ -75,7 +74,15 @@ class State(str, Enum):           # 상태 머신 상태 (BT STATUS에 그대로
     MANUAL = "MANUAL"
 
 
-TARGET_COLOR = {Target.WORK: "blue", Target.DROP_A: "red", Target.DROP_B: "green", Target.PARK: "yellow"}
+class Mode(str, Enum):            # 상태 머신 모드 (2026-11-02)
+    NONE = "NONE"
+    SETUP = "SETUP"               # 초기 설정 — 색마다 지점을 찾아가 트랙 매핑
+    WORK = "WORK"                 # 작업 — 모양별 상차·하차
+
+
+COLORS = ("red", "green", "blue", "yellow")      # 마커 색 = 초기 설정 탐색 순서. 지점 ↔ 색은 트랙 매핑으로 정함
+MAX_ITEMS = 9                                    # 1회 적재 최대 개수 (7세그먼트 1자리) — 넘으면 여러 번 왕복
+MAX_ORDER = 99                                   # 물품별 입력 수량 최대 (두 자리, 2026-11-03 변경 시나리오)
 CARGO_TARGET = {Cargo.CIRCLE: Target.DROP_A, Cargo.SQUARE: Target.DROP_B}
 CARGO_LED = {Cargo.CIRCLE: LedState.RED, Cargo.SQUARE: LedState.GREEN}
 SIGN_TARGET = {Sign.WORK: Target.WORK, Sign.DROP_A: Target.DROP_A, Sign.DROP_B: Target.DROP_B, Sign.PARK: Target.PARK}

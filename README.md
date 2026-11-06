@@ -1,6 +1,6 @@
 # ROS 2와 Teachable Machine을 활용한 비전 인식 물류 AGV
 
-작업장에서 카메라와 AI로 화물 종류(원/사각형 이미지)를 인식하고, 종류별로 정해진 하차 지점까지 라인트레이싱으로 자동 운반·분류하는 소형 물류 자동화 차량(AGV)입니다.
+트랙을 스스로 돌며 지점 표지판(AI)과 갈래 색 마커의 대응을 익히고, 앱에서 입력한 모양별 화물 개수만큼 상차 지점에서 싣고 모양별 하차 지점까지 라인트레이싱으로 운반하는 소형 물류 자동화 차량(AGV)입니다.
 
 ## 구성
 | 구분 | 내용 |
@@ -19,7 +19,7 @@
 - [클래스 설계](02_design/software/class_design.md) — 공통 타입, 클래스·메서드, 상태 머신 이벤트/동작, 시퀀스
 - [블루투스 통신 규약](02_design/communication/bluetooth_protocol.md) · [Teachable Machine 클래스](02_design/ai/tm_classes.md)
 - [단계별 테스트 트랙](02_design/track/test_track.md)
-- [개발 순서 및 절차](02_design/development_plan.md) — 작업 흐름·주차별 계획·관문·기능 개발 절차·Git 규칙 · [주차별 실행 체크리스트](02_design/weekly_checklist.md)
+- [개발 순서 및 절차](02_design/development_plan.md) — 작업 흐름·주차별 계획·관문·기능 개발 절차·Git 규칙 · [주차별 실행 체크리스트](02_design/weekly_checklist.md) · [소프트웨어 베이스라인](02_design/baseline.md)
 
 ## 폴더 구조
 ```

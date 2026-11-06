@@ -2,8 +2,8 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>agv_vision</name>
-  <version>0.1.0</version>
-  <description>카메라 영상 처리 — 라인 검출, 정지선 판정, 색 마커 판별 (AI 분류는 다음 단계)</description>
+  <version>0.4.0</version>
+  <description>카메라 영상 처리 — 라인 검출, 정지선 판정, 색 마커 판별, 표지판 분류(LiteRT)</description>
   <maintainer email="noreply@example.com">logistics-automation team</maintainer>
   <license>MIT</license>
 

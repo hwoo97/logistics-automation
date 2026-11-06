@@ -240,9 +240,9 @@ def test_stop_and_cancel():
 
 def test_unsupported_command_fails_safely():
     d = DriveController()
-    d.start(DriveCommand.APPROACH)
+    d.start(DriveCommand.STRAIGHT)
     out = d.step(LineInput(0.0, True), DT)
-    assert out.done and out.result == "E_UNSUPPORTED_APPROACH" and out.linear == 0
+    assert out.done and out.result == "E_UNSUPPORTED_STRAIGHT" and out.linear == 0
 
 
 def test_set_speed_applies_while_driving():
@@ -687,3 +687,70 @@ def test_uturn_line_timeout():
         if out.done:
             break
     assert out.done and out.result == "E_LINE"
+
+
+# ── 정지선 통과·표지판 접근 (2026-11-02) ──────────────────
+
+STOP = LineInput(0.0, True, LineEvent.STOP_LINE, LineEvent.STOP_LINE, 90.0, True)
+STOP_RAW = LineInput(0.0, True, LineEvent.NONE, LineEvent.STOP_LINE, 90.0, True)
+
+
+def test_skip_stop_line_passes_one_then_stops_at_next():
+    d = DriveController()
+    d.start(DriveCommand.FOLLOW_TO_EVENT, skip_stop_lines=1)
+    for line in (STOP_RAW, STOP, STOP):
+        out = d.step(line, DT)
+        assert not out.done and out.linear > 0 and d.phase == "PASS STOP_LINE"
+    for _ in range(DriveConfig().pass_clear_frames):
+        d.step(AHEAD, DT)
+    assert d.skip_stop == 0 and d.phase == "FOLLOW"
+    out = d.step(STOP_RAW, DT)                                 # 다음 정지선은 멈춤
+    assert out.linear == 0 and d.phase == "VERIFY STOP_LINE"
+
+
+def test_skip_stop_line_flicker_is_one_line():
+    """통과 중 판정이 잠깐 빠졌다 다시 나와도 같은 정지선."""
+    d = DriveController()
+    d.start(DriveCommand.FOLLOW_TO_EVENT, skip_stop_lines=1)
+    for line in (STOP, AHEAD, AHEAD, STOP, AHEAD, STOP):
+        assert not d.step(line, DT).done
+    assert d.skip_stop == 1
+
+
+def test_skip_does_not_hide_other_events():
+    d = DriveController()
+    d.start(DriveCommand.FOLLOW_TO_EVENT, skip_stop_lines=1)
+    out = d.step(LineInput(0.0, True, LineEvent.CORNER_LEFT, LineEvent.CORNER_LEFT), DT)
+    assert out.done and out.result == "CORNER_LEFT"
+
+
+def test_without_skip_stop_line_still_stops():
+    d = DriveController()
+    d.start(DriveCommand.FOLLOW_TO_EVENT)
+    assert d.step(STOP, DT).done
+
+
+def test_approach_slow_and_ignores_events():
+    c = DriveConfig()
+    d = DriveController()
+    d.set_target("red")
+    d.start(DriveCommand.APPROACH)
+    for line in (STOP, LineInput(0.0, True, LineEvent.LINE_END, LineEvent.LINE_END), BAR):
+        out = d.step(line, DT, see("left", y=200.0))
+        assert not out.done and out.linear == pytest.approx(c.approach_speed) and d.phase == "APPROACH"
+
+
+def test_approach_steers_and_goes_straight_when_line_gone():
+    d = DriveController()
+    d.start(DriveCommand.APPROACH)
+    assert d.step(LineInput(0.4, True), DT).angular < 0          # 라인이 오른쪽 → 오른쪽으로
+    out = d.step(LineInput(0.4, False), DT)
+    assert out.angular == 0 and out.linear > 0
+
+
+def test_approach_cancel():
+    d = DriveController()
+    d.start(DriveCommand.APPROACH)
+    d.step(AHEAD, DT)
+    out = d.cancel()
+    assert out.done and out.result == "STOPPED" and out.linear == 0

@@ -7,11 +7,12 @@
   io.mission(cmd)
 
 standalone=True : mission_node가 없는 단위 개발 단계. 상태(IDLE·MANUAL·ESTOP)를 브리지가 직접 관리한다.
-standalone=False: 작업 명령은 mission_node로 넘기고 상태는 /mission/status를 따른다 (agv_interfaces 작성 후 사용).
+standalone=False: SETUP·START·STOP·RESUME·MANUAL·MOVE는 mission_node로 넘기고 상태·매핑은 /mission/status를 따른다.
+  START는 매핑 4개가 없으면 여기서 거부(NAK). mission_node가 없으면 상태가 바뀌지 않으므로 standalone으로 쓴다.
 """
 from agv_protocol.messages import (
     WATCH_KEYS, check_allowed, command_key, format_ack, format_dev, format_error, format_event,
-    format_nak, format_pong, format_status, parse_command,
+    format_map, format_nak, format_pong, format_status, parse_command,
 )
 
 
@@ -20,7 +21,8 @@ class BridgeCore:
         self.io = io
         self.standalone = standalone
         self.state = "IDLE"
-        self.done, self.total, self.cargo, self.target = 0, 0, "NONE", "NONE"
+        self.mode, self.done, self.total, self.cargo, self.load, self.target = "NONE", 0, 0, "NONE", 0, "NONE"
+        self.track_map: dict = {}            # 지점 → 마커 색 (mission_node가 알려 줌)
         self.watches: set[str] = set()
         self.link_lost = False
         self.driving = False                 # DEV DRIVE FOLLOW로 drive_node가 주행 중 (노드가 set_driving으로 알림)
@@ -31,22 +33,30 @@ class BridgeCore:
         self.driving = on
 
     def status_line(self) -> str:
-        return format_status(self.state, self.done, self.total, self.cargo, self.target)
+        return format_status(self.state, self.mode, self.done, self.total, self.cargo, self.load, self.target)
 
     def _set_state(self, state):
         if state != self.state:
             self.state = state
             self.io.send(self.status_line())
 
-    def on_mission_status(self, state, done, total, cargo, target):
-        """standalone=False일 때 /mission/status 수신."""
-        self.done, self.total, self.cargo, self.target = done, total, cargo, target
-        self._set_state(state)
+    def on_mission_status(self, state, mode, done, total, cargo, load, target, track_map: dict):
+        """standalone=False일 때 /mission/status 수신. 매핑이 바뀌면 MAP도 보낸다."""
+        before = self.status_line()
+        self.mode, self.done, self.total, self.cargo, self.load, self.target = mode, done, total, cargo, load, target
+        if track_map != self.track_map:
+            self.track_map = dict(track_map)
+            self.io.send(format_map(self.track_map))
+        if state != self.state:
+            self._set_state(state)
+        elif self.status_line() != before:
+            self.io.send(self.status_line())         # 개수(7세그먼트)처럼 상태 안에서 바뀌는 값도 바로 보냄
 
     # ── 연결·하트비트 ─────────────────────────────────────
 
     def on_connect(self):
         self.io.send(self.status_line())
+        self.io.send(format_map(self.track_map))
         if self.link_lost:
             self.io.send(format_error("E_LINK", "연결 끊김 후 재연결 - RESUME 필요"))
 
@@ -91,6 +101,9 @@ class BridgeCore:
         elif self.standalone:
             self._standalone(cmd)
         else:
+            if cmd.kind == "START" and not all(self.track_map.get(t) for t in ("WORK", "DROP_A", "DROP_B", "PARK")):
+                self.io.send(format_nak("START", "초기 설정 필요"))
+                return
             if cmd.kind == "RESUME":
                 self.link_lost = False
             self.io.send(format_ack(cmd))
@@ -98,8 +111,8 @@ class BridgeCore:
 
     def _standalone(self, cmd):
         a = cmd.args
-        if cmd.kind == "START":
-            self.io.send(format_nak("START", "mission_node 없음 (단위 개발 단계)"))
+        if cmd.kind in ("START", "SETUP"):
+            self.io.send(format_nak(cmd.kind, "mission_node 없음 (단위 개발 단계)"))
             return
         self.io.send(format_ack(cmd))
         if cmd.kind == "STOP":

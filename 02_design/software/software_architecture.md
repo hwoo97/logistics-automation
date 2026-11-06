@@ -23,14 +23,14 @@
 ```
  ┌──────────────────────────────────────────────────────────────┐
  │ ③ ROS 노드 계층   (rclpy — 구독·발행·서비스·액션·파라미터)        │
- │    motor_node  line_node  marker_node  mission_node  bt_bridge…│
+ │    motor_node  line_node  marker_node  mission_node  segment…  │
  ├──────────────────────────────────────────────────────────────┤
  │ ② 알고리즘 계층   (순수 Python + OpenCV/numpy, ROS 의존 없음)     │
- │    LineDetector  MarkerDetector  CargoClassifier  PidController │
- │    MissionStateMachine  BranchSelector  agv_protocol          │
+ │    LineDetector  MarkerDetector  SignClassifier  PidController │
+ │    DriveController  MissionStateMachine  agv_protocol         │
  ├──────────────────────────────────────────────────────────────┤
  │ ① 하드웨어 드라이버 계층  (인터페이스 + 실제/가짜 구현)              │
- │    MotorDriver  ServoDriver  UltrasonicDriver  LedDriver       │
+ │    MotorDriver  ServoDriver  UltrasonicDriver  LedDriver  Seg… │
  │    └ 실제: lgpio / smbus2 (PCA9685)   └ 가짜: 메모리 기록         │
  └──────────────────────────────────────────────────────────────┘
 ```
@@ -75,7 +75,7 @@ logistics-automation/
 │  └─ agv_bringup/                  # 실행 구성
 │     ├─ launch/  agv.launch.py  s0_hw.launch.py … s10_full.launch.py
 │     ├─ config/  params.yaml
-│     └─ models/  cargo.tflite  sign.tflite  labels_*.txt
+│     └─ models/  sign.tflite  labels_sign.txt
 │
 ├─ laptop_app/                      # 노트북 제어 앱 (ROS 없음)
 │  ├─ main.py  _paths.py
@@ -101,11 +101,13 @@ logistics-automation/
 | `drivers/servo_pca9685.py` | `ServoDriver`, `Pca9685ServoDriver` | 채널별 각도 → PWM, 50Hz 설정, GPIO17(OE) 처리 |
 | `drivers/ultrasonic.py` | `UltrasonicDriver`, `LgpioUltrasonicDriver` | Trig 펄스 → Echo 폭 → 거리(m), 시간 초과 처리 |
 | `drivers/led.py` | `LedDriver`, `LgpioLedDriver` | 빨강·초록 켜기/끄기 |
+| `drivers/segment.py` | `SegmentDriver`, `LgpioSegmentDriver` | 7세그먼트 a~g 7핀, 글자 → 세그먼트 표, 공통 애노드 반전 |
 | `drivers/fake.py` | `FakeMotorDriver` 등 | 하드웨어 없이 호출 기록 (테스트·노트북 실행용) |
 | `motor_node.py` | `MotorNode` | `/cmd_vel` → 좌우 속도 → 바퀴 4개, 워치독, `/safety/estop` 래치 |
 | `pantilt_node.py` | `PanTiltNode` | `/pantilt/pose` → 자세별 각도, 안정화 대기 |
 | `ultrasonic_node.py` | `UltrasonicNode` | 15Hz 측정, 중앙값 필터, `/ultrasonic/range` |
 | `led_node.py` | `LedNode` | `/led/state` → 점등·깜빡임 타이머 |
+| `segment_node.py` | `SegmentNode` | `/display/digit` → 7세그먼트 |
 
 - 노드 파라미터 `use_fake_hw: true`면 가짜 드라이버 사용
 
@@ -118,16 +120,16 @@ logistics-automation/
 | `classifier.py` | `TfliteClassifier.predict(bgr) -> (label, score)`, `decide(results)` | LiteRT 추론, 5프레임 판정 규칙 |
 | `line_node.py` | `LineNode` | 영상 구독(최신 1장) → 라인·정지선 판정, `/line/state`·`/stop_line/state` 발행 |
 | `marker_node.py` | `MarkerNode` | 프레임마다 판별, `/marker/state` 발행 |
-| `classifier_node.py` | `ClassifierNode` | `/vision/classify` 요청 시 모델(CARGO/SIGN) 선택 → 판정 |
+| `classifier_node.py` | `ClassifierNode` | `/vision/classify` 요청 시 표지판 모델로 판정 |
 
 ### agv_control — 주행·상태 머신
 | 모듈 | 클래스 / 함수 | 책임 |
 |------|--------------|------|
 | `pid.py` | `PidController` | 오프셋 → 각속도 |
 | `drive_controller.py` | `DriveController` | 동작별 단계 진행(FOLLOW·UTURN·APPROACH, FOLLOW 안에서 마커 확인·회전) — 입력: 라인·마커 상태, 출력: 속도 명령·완료 이벤트 |
-| `state_machine.py` | `MissionStateMachine.handle(event) -> list[Action]` | 기능 설계서 5절 상태 머신. 이벤트(START, STOP_LINE, SIGN, RANGE, CARGO, TIMEOUT…) → 동작(drive, pantilt, led, classify, report…) |
+| `state_machine.py` | `MissionStateMachine.handle(event) -> list[Action]` | 기능 설계서 5절 상태 머신(초기 설정·작업). 이벤트(SETUP, START, STOP_LINE, SIGN, RANGE, TICK…) → 동작(drive, target, pantilt, led, digit, classify, save_map, report…) |
 | `drive_node.py` | `DriveNode` | `/drive` 액션 서버, `DriveController` 실행, `/cmd_vel` 발행 |
-| `mission_node.py` | `MissionNode` | 토픽·서비스 결과를 이벤트로 바꿔 상태 머신에 넣고, 나온 동작을 실행 |
+| `mission_node.py` | `MissionNode` | 토픽·서비스 결과를 이벤트로 바꿔 상태 머신에 넣고, 나온 동작을 실행, 트랙 매핑 파일 읽기·쓰기 |
 
 ### agv_bt / agv_protocol — 블루투스
 | 모듈 | 클래스 / 함수 | 책임 |
@@ -146,7 +148,8 @@ logistics-automation/
 | `main.py` | 앱 시작, 설정 읽기 |
 | `bt_client.py` | 채널 1 연결·송수신 스레드, PING 0.5초, `agv_protocol` 사용 |
 | `video_receiver.py` | 채널 2 수신 → `FrameReader` → 이미지 큐 |
-| `ui/main_window.py` | 연결·작업 입력·비상 정지·상태 표시 (tkinter) |
+| `ui/main_window.py` | 연결·비상 정지·영상 받기 (tkinter) |
+| `ui/user_tab.py` | 초기 설정·트랙 매핑 표, 원·사각 개수 입력·작업 시작, 상태 표시 |
 | `ui/video_view.py` | 영상 표시 + 상태 문구 겹쳐 그리기 |
 | `ui/manual_pad.py` | 방향 버튼·W/A/S/D → `MOVE` 0.3초 반복 |
 
@@ -175,7 +178,7 @@ logistics-automation/
 | `s1_line.launch.py` | camera, motor, line, drive | S1~S3 라인·코너·정지선 |
 | `s4_marker.launch.py` | camera, pantilt, marker | S4 마커 판별 |
 | `s5_branch.launch.py` | + motor, line, drive, mission(분기 시험 모드) | S5 분기 |
-| `s6_classify.launch.py` | camera, pantilt, classifier | S6·S7 인식, 학습 데이터 수집 |
+| `s6_classify.launch.py` | camera, pantilt, classifier | S6 표지판 인식, 학습 데이터 수집 |
 | `agv.launch.py` | 전체 | S8~S10, 실제 운용 |
 
 ### 파라미터 파일 `config/params.yaml` (구조)
@@ -184,9 +187,10 @@ motor_node:      { ros__parameters: { duty_max: 0.75, pwm_hz: 1000, wheel_map: [
 pantilt_node:    { ros__parameters: { pan_channel: 0, tilt_channel: 1, poses: { LINE: [70, 130], JUNCTION: [65, 165], SIGN: [65, 180] } } }
 line_node:       { ros__parameters: { roi_ratio: 0.33, confirm_frames: 3 } }
 marker_node:     { ros__parameters: { red: [168, 10, 125, 125], yellow: [...], green: [...], blue: [...], min_area: 30 } }
-classifier_node: { ros__parameters: { cargo_model: models/cargo.tflite, sign_model: models/sign.tflite, min_score: 0.8 } }
+classifier_node: { ros__parameters: { sign_model: models/sign.tflite, min_score: 0.8 } }
+segment_node:    { ros__parameters: { pins: [4, 27, 12, 13, 9, 10, 11], common_anode: false } }
 ultrasonic_node: { ros__parameters: { rate_hz: 15, median_window: 5 } }
-mission_node:    { ros__parameters: { load_distance: 0.10, load_hold_s: 3.0, obstacle_distance: 0.15, obstacle_clear_s: 1.0, cargo_retry: 2 } }
+mission_node:    { ros__parameters: { sign_distance: 0.20, approach_timeout_s: 10.0, item_interval_s: 1.0, obstacle_distance: 0.15, obstacle_clear_s: 1.0, sign_retry: 1, map_file: ~/.agv/track_map.json } }
 bt_bridge_node:  { ros__parameters: { heartbeat_timeout_s: 1.5, video_fps: 5, video_size: [320, 240], jpeg_quality: 50 } }
 ```
 - 숫자는 초기값, 테스트 트랙 단계에서 보정 (기능 설계서 10절)
@@ -248,5 +252,5 @@ bt_bridge_node:  { ros__parameters: { heartbeat_timeout_s: 1.5, video_fps: 5, vi
 | 3 | `LineDetector`·`StopLineDetector` + `line_node`, `PidController` + `DriveController` + `drive_node` | S1~S3, S8 |
 | 4 | `MarkerDetector` + `marker_node`, `DriveController` 마커 확인·회전 | S4, S5 |
 | 5 | 노트북 앱 + `agv_bt` (제어 채널 먼저, 영상 나중) | S0 |
-| 6 | `TfliteClassifier` + `classifier_node` (데이터 수집 → 학습) | S6, S7 |
+| 6 | `TfliteClassifier` + `classifier_node` (표지판 데이터 수집 → 학습), `segment_node` | S6, S7 |
 | 7 | `MissionStateMachine` + `mission_node` | 시나리오 테스트 → S9, S10 |

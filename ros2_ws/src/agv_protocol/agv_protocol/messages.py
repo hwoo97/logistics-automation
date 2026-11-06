@@ -5,7 +5,7 @@
 """
 from dataclasses import dataclass, field
 
-from .types import LedState, Pose, State
+from .types import COLORS, MAX_ORDER, LedState, Pose, State, Target
 
 CONTROL_CHANNEL = 1
 VIDEO_CHANNEL = 2
@@ -18,6 +18,7 @@ _HW_STATES = frozenset({"IDLE", "MANUAL", "ESTOP", "ERROR"})
 
 # 명령별 허용 상태 (bluetooth_protocol.md 2절·3-1절)
 ALLOWED_STATES = {
+    "SETUP": frozenset({"IDLE"}),
     "START": frozenset({"IDLE"}),
     "STOP": ALL_STATES,
     "RESUME": frozenset({"ESTOP", "ERROR"}),
@@ -139,12 +140,15 @@ def parse_command(line: str) -> Command:
     cmd = Command(parts[0].upper(), parts[1:])
     if cmd.kind == "DEV" and cmd.args:
         cmd.args[0] = cmd.args[0].upper()
-    if cmd.kind == "START":
-        _expect_args(cmd, 1)
-        _number(cmd.args[0], 1, 9, "작업 횟수")
-        if not cmd.args[0].isdigit():
-            raise ValueError(f"작업 횟수: 정수 필요 ({cmd.args[0]})")
-    elif cmd.kind in ("STOP", "RESUME", "PING"):
+    if cmd.kind == "START":                                         # START <원> <사각> 각 0~99 (2026-11-03)
+        _expect_args(cmd, 2)
+        for text, name in zip(cmd.args, ("원 개수", "사각형 개수")):
+            _number(text, 0, MAX_ORDER, name)
+            if not text.isdigit():
+                raise ValueError(f"{name}: 정수 필요 ({text})")
+        if int(cmd.args[0]) + int(cmd.args[1]) == 0:
+            raise ValueError("개수: 원·사각형 중 하나는 1개 이상")
+    elif cmd.kind in ("SETUP", "STOP", "RESUME", "PING"):
         _expect_args(cmd, 0)
     elif cmd.kind == "MANUAL":
         if len(cmd.args) != 1 or cmd.args[0].upper() not in ("ON", "OFF"):
@@ -195,8 +199,28 @@ def format_command(kind: str, *args) -> str:
 
 # ── 차량 → 노트북 ─────────────────────────────────────────
 
-def format_status(state, done: int, total: int, cargo=None, target=None) -> str:
-    return f"STATUS {_fmt(state)} {done}/{total} {_fmt(cargo or 'NONE')} {_fmt(target or 'NONE')}"
+def format_status(state, mode="NONE", done: int = 0, total: int = 0, cargo=None, load: int = 0, target=None) -> str:
+    """STATUS <state> <mode> <done>/<total> <cargo> <load> <target> — 초기 설정 중 target은 탐색 중인 색."""
+    return (f"STATUS {_fmt(state)} {_fmt(mode)} {done}/{total} {_fmt(cargo or 'NONE')} {load} "
+            f"{_fmt(target or 'NONE')}")
+
+
+MAP_TARGETS = (Target.WORK.value, Target.DROP_A.value, Target.DROP_B.value, Target.PARK.value)
+
+
+def format_map(track_map: dict) -> str:
+    """MAP WORK=blue DROP_A=red DROP_B=- PARK=- — 지점 → 마커 색, 모르면 -."""
+    return "MAP " + " ".join(f"{t}={track_map.get(t) or '-'}" for t in MAP_TARGETS)
+
+
+def parse_map(items: list[str]) -> dict:
+    out = {}
+    for item in items:
+        target, color = item.split("=")
+        if target not in MAP_TARGETS or color not in (*COLORS, "-"):
+            raise ValueError(f"MAP 항목 오류 ({item})")
+        out[target] = None if color == "-" else color
+    return out
 
 
 def format_event(kind: str, detail: str = "") -> str:
@@ -232,9 +256,11 @@ def parse_reply(line: str) -> dict:
     head, rest = parts[0], parts[1:]
     try:
         if head == "STATUS":
-            done, total = rest[1].split("/")
-            return {"type": "STATUS", "state": rest[0], "done": int(done), "total": int(total),
-                    "cargo": rest[2], "target": rest[3]}
+            done, total = rest[2].split("/")
+            return {"type": "STATUS", "state": rest[0], "mode": rest[1], "done": int(done), "total": int(total),
+                    "cargo": rest[3], "load": int(rest[4]), "target": rest[5]}
+        if head == "MAP":
+            return {"type": "MAP", "map": parse_map(rest)}
         if head == "EVENT":
             return {"type": "EVENT", "event": rest[0], "detail": " ".join(rest[1:])}
         if head == "ERROR":

@@ -39,7 +39,7 @@ class Pose(str, Enum):            # 팬틸트 자세
 class LedState(str, Enum):
     OFF = "OFF"; RED = "RED"; GREEN = "GREEN"; ERROR = "ERROR"
 
-TARGET_COLOR = {Target.WORK: "blue", Target.DROP_A: "red", Target.DROP_B: "green", Target.PARK: "yellow"}
+COLORS = ("red", "green", "blue", "yellow")   # 초기 설정 탐색 순서. 지점 ↔ 색 대응은 고정하지 않고 트랙 매핑으로 정함 (2026-11-02)
 CARGO_TARGET = {Cargo.CIRCLE: Target.DROP_A, Cargo.SQUARE: Target.DROP_B}
 CARGO_LED    = {Cargo.CIRCLE: LedState.RED, Cargo.SQUARE: LedState.GREEN}
 SIGN_TARGET  = {Sign.WORK: Target.WORK, Sign.DROP_A: Target.DROP_A, Sign.DROP_B: Target.DROP_B, Sign.PARK: Target.PARK}
@@ -290,10 +290,13 @@ classDiagram
         +handle(event) list
     }
     class MissionContext {
-        +total: int
+        +mode: str
+        +plan: list
         +done: int
         +cargo: Cargo
+        +load: int
         +target: Target
+        +track_map: dict
         +retry: int
         +skip_stop_lines: int
         +resume_state: State
@@ -336,7 +339,7 @@ class DriveOutput:
 ### 3.2 상태 머신
 ```python
 class State(str, Enum):
-    IDLE = "IDLE"; NAVIGATE = "NAVIGATE"; AT_JUNCTION = "AT_JUNCTION"; CHECK_SIGN = "CHECK_SIGN"
+    IDLE = "IDLE"; NAVIGATE = "NAVIGATE"; CHECK_SIGN = "CHECK_SIGN"
     APPROACH = "APPROACH"; LOAD = "LOAD"; UNLOAD = "UNLOAD"; UTURN = "UTURN"; PARKED = "PARKED"
     PAUSED_OBSTACLE = "PAUSED_OBSTACLE"; ERROR = "ERROR"; ESTOP = "ESTOP"; MANUAL = "MANUAL"
 
@@ -352,33 +355,36 @@ class Action:                     # 상태 머신 출력 (MissionNode가 실행)
 
 @dataclass
 class MissionContext:
-    total: int = 0
-    done: int = 0
-    cargo: Cargo = Cargo.NONE
-    target: Target = Target.WORK
+    mode: str = "NONE"            # NONE / SETUP / WORK
+    plan: list = field(default_factory=list)    # 작업: 1회 적재 목록 [(Cargo, ≤ 9)] — 먼저 운반할 물품 무작위, 9개씩 나눔 (2026-11-03)
+    done: int = 0                 # 하차한 개수 (초기 설정: 확인한 지점 수)
+    cargo: Cargo = Cargo.NONE     # 실은 모양
+    load: int = 0                 # 실은 개수 (7세그먼트)
+    target: Target = Target.WORK  # 작업 목적지
+    explore: str | None = None    # 초기 설정: 탐색 중인 색
+    track_map: dict = field(default_factory=dict)   # Target → 색, ~/.agv/track_map.json에서 읽고 씀
     retry: int = 0
-    skip_stop_lines: int = 0      # LOAD 후 1 → 작업장 정지선 통과
+    skip_stop_lines: int = 0      # 모든 UTURN 후 1 → 방금 지점의 정지선 통과
     resume_state: State | None = None   # ESTOP·ERROR·PAUSED 후 돌아갈 상태
-    hold_since: float | None = None     # 적재 거리 유지 시작 시각
+    next_tick: float | None = None      # 상차·하차 1초 간격
 
 class MissionStateMachine:
     def __init__(self, cfg: MissionConfig): ...
     def handle(self, event: Event) -> list[Action]: ...   # 순수 함수처럼 동작 (시간은 event로 전달)
 ```
-- START: `IDLE` → `UTURN` (출발 위치에서 표지판을 보고 서 있으므로) → `NAVIGATE`
-- `DRIVE_DONE(STOP_LINE)` 수신 시 `skip_stop_lines > 0`이면 1 줄이고 `DRIVE(FOLLOW_TO_EVENT)` 재요청
-- `AT_JUNCTION`: 기능 설계서의 NAVIGATE 안에서 분기점 처리 단계를 별도 상태로 분리 (마커 요청 → 응답 대기)
+- SETUP·START: `IDLE` → `UTURN` (출발 위치에서 표지판을 보고 서 있으므로) → `NAVIGATE`. 목적지 색은 `TARGET` 동작으로 `/drive/target`에 정함 (작업: `track_map[target]`, 초기 설정: `explore`)
+- `DRIVE_DONE(STOP_LINE)` 수신 시 `skip_stop_lines > 0`이면 1 줄이고 `DRIVE(FOLLOW_TO_EVENT)` 재요청, 아니면 `DRIVE(APPROACH)`
+- 모드별 CHECK_SIGN 이후 동작은 기능 설계서 5절 표
 
 **이벤트 (MissionNode → 상태 머신)**
 | kind | data | 발생 |
 |------|------|------|
-| `START` | `total` | BT 명령 |
+| `SETUP` | — | BT 명령 |
+| `START` | `circle`, `square` | BT 명령 |
 | `STOP` / `RESUME` | — | BT 명령 |
 | `MANUAL_ON` / `MANUAL_OFF` | — | BT 명령 |
 | `DRIVE_DONE` | `result`(STOP_LINE·JUNCTION_*·CORNER_*·TURN_DONE·UTURN_DONE·E_TURN·E_LINE) | `/drive` 액션 결과 |
-| `MARKERS` | `left`, `front`, `right` | `/marker/detect` 응답 |
 | `SIGN` | `label` 또는 `None` | `/vision/classify SIGN` 응답 |
-| `CARGO` | `label` 또는 `None` | `/vision/classify CARGO` 응답 |
 | `RANGE` | `distance`, `now` | `/ultrasonic/range` |
 | `POSE_READY` | — | 팬틸트 안정화 완료 |
 | `TICK` | `now` | 타이머 (시간 조건 처리) |
@@ -390,26 +396,30 @@ class MissionStateMachine:
 | `CANCEL_DRIVE` | — | 액션 취소 + 정지 |
 | `POSE` | `pose` | `/pantilt/pose` |
 | `LED` | `state` | `/led/state` |
-| `DETECT_MARKERS` | — | `/marker/detect` 호출 |
+| `DIGIT` | `char` | `/display/digit` (7세그먼트) |
+| `TARGET` | `color` | `/drive/target` (목적지 색) |
+| `SAVE_MAP` | `track_map` | 매핑 파일 저장 + BT `MAP` 전송 |
 | `CLASSIFY` | `mode` | `/vision/classify` 호출 |
 | `ESTOP` | `on` | `/safety/estop` |
 | `REPORT` | `event` / `error`, `message` | BT로 EVENT·ERROR 전송 (bt_bridge 경유) |
 
-**전이 예시 (분기점)**
+**전이 예시 (지점 도착 — 작업 모드, 하차 A)**
 | 현재 상태 | 이벤트 | 동작 | 다음 상태 |
 |-----------|--------|------|-----------|
-| NAVIGATE | `DRIVE_DONE(JUNCTION_T)` | `POSE(JUNCTION)` | AT_JUNCTION |
-| AT_JUNCTION | `POSE_READY` | `DETECT_MARKERS` | AT_JUNCTION |
-| AT_JUNCTION | `MARKERS` → `choose_branch` 성공 | `POSE(LINE)`, `DRIVE(TURN_LEFT 등)` | NAVIGATE |
-| AT_JUNCTION | `MARKERS` → `MarkerError` | `LED(ERROR)`, `REPORT(error=E_MARKER)` | ERROR |
+| NAVIGATE | `DRIVE_DONE(STOP_LINE)`, `skip_stop_lines = 0` | `DRIVE(APPROACH)` | APPROACH |
+| APPROACH | `RANGE(≤ 0.20)` 3회 | `CANCEL_DRIVE`, `POSE(SIGN)` | CHECK_SIGN |
+| CHECK_SIGN | `POSE_READY` | `CLASSIFY(SIGN)` | CHECK_SIGN |
+| CHECK_SIGN | `SIGN(sign_drop_a)` = 기대 목적지 | — | UNLOAD |
+| UNLOAD | `TICK` 1초마다 | `DIGIT(load)`, 마지막에 `LED(OFF)`, `REPORT(UNLOADED)` | UNLOAD |
+| UNLOAD | `load = 0` | `POSE(LINE)`, `TARGET(track_map[다음 목적지])`, `DRIVE(UTURN)`, `skip_stop_lines = 1` | UTURN |
 
-목적지 색 스티커의 좌우 판단과 회전은 `DriveController`가 맡는다 (2026-11-02, functional_design F6). `mission_node`는 `/drive/target`으로 목적지 색만 정한다. 아래 표의 `AT_JUNCTION`·`DETECT_MARKERS`·`MARKERS`는 이전 방식이며 상태 머신 작업 때 정리한다.
+분기점 판단(색 스티커 좌우)과 회전은 `DriveController`가 맡는다 (2026-11-02, functional_design F6) — 상태 머신에는 분기점 상태가 없다.
 
 ### 3.3 노드
 | 클래스 | 구성 | 주요 메서드 |
 |--------|------|-------------|
 | `DriveNode` | 액션 서버 `/drive`, 구독 `/line/state`, 발행 `/cmd_vel`, 20Hz 타이머 | `on_goal(goal)` → `controller.start()`, `on_line(msg)`, `on_timer()` → `step()` → `/cmd_vel`, 완료 시 결과 반환 |
-| `MissionNode` | 구독 `/mission/command`, `/ultrasonic/range`, `/pantilt/ready` · 발행 `/pantilt/pose`, `/led/state`, `/mission/status`, `/safety/estop` · 액션 클라이언트 `/drive` · 서비스 클라이언트 2개 · 10Hz 타이머 | 콜백마다 `Event` 생성 → `sm.handle()` → `execute(actions)` → 상태 바뀌면 `/mission/status` 발행 |
+| `MissionNode` | 구독 `/mission/command`, `/ultrasonic/range`, `/pantilt/ready` · 발행 `/pantilt/pose`, `/led/state`, `/display/digit`, `/drive/target`, `/mission/status`, `/safety/estop` · 액션 클라이언트 `/drive` · 서비스 클라이언트 `/vision/classify` · 10Hz 타이머 · 매핑 파일 읽기·쓰기 | 콜백마다 `Event` 생성 → `sm.handle()` → `execute(actions)` → 상태 바뀌면 `/mission/status` 발행 |
 
 ---
 
@@ -451,12 +461,13 @@ classDiagram
 ```python
 @dataclass
 class Command:
-    kind: str                     # START / STOP / RESUME / MANUAL / MOVE / PING
+    kind: str                     # SETUP / START / STOP / RESUME / MANUAL / MOVE / PING
     args: list[str] = field(default_factory=list)
 
 def parse_command(line: str) -> Command: ...            # 형식 오류 시 ValueError
 def format_command(kind: str, *args) -> str: ...        # 노트북 쪽 사용
-def format_status(state, done, total, cargo, target) -> str: ...
+def format_status(state, mode, done, total, cargo, load, target) -> str: ...
+def format_map(track_map: dict) -> str: ...            # MAP WORK=blue DROP_A=red ...
 def format_event(kind: str, detail: str = "") -> str: ...
 def format_error(code: str, detail: str = "") -> str: ...
 def parse_reply(line: str) -> dict: ...                 # 노트북 쪽: STATUS/EVENT/ERROR/ACK/NAK/PONG 해석
@@ -523,10 +534,10 @@ classDiagram
 | 클래스 | 책임 |
 |--------|------|
 | `App` | 설정(Pi 블루투스 주소) 읽기, 객체 생성·연결, tkinter 메인 루프 |
-| `BtClient` | 채널 1 연결, 수신 스레드(`parse_reply` → `on_reply` 콜백), 0.5초 PING 타이머, `send("START", 3)` |
+| `BtClient` | 채널 1 연결, 수신 스레드(`parse_reply` → `on_reply` 콜백), 0.5초 PING 타이머, `send("START", 3, 2)` |
 | `VideoReceiver` | 채널 2 수신 스레드 → `FrameReader.feed` → 큐 (최신 1장 유지) |
 | `MainWindow` | 연결 막대(연결 방식·주소·연결·RTT·**비상 정지(크게, 스페이스바)**) + 탭 2개, 수신 메시지를 탭에 분배 |
-| `UserTab` | 사용자 탭 — 작업 횟수 입력·시작, 재개, 상태·진행·화물·목적지, 사건·오류, 영상, `ManualPad` |
+| `UserTab` | 사용자 탭 — 초기 설정 버튼·트랙 매핑 표, 적·녹 수량 입력(각 0~99)·작업 시작, 매핑 결과 config.json 저장, 재개, 상태·진행·실은 화물·개수·목적지, 사건·오류, 영상, `ManualPad` |
 | `DevTab` | 개발자 탭 — `DEV` 명령(LED·팬틸트·바퀴), 측정값(초음파 그래프·라인·Pi 상태·노드), 영상 FPS·사진 저장, 메시지 콘솔 |
 | `FakeVehicle` | 가짜 차량 — `RfcommServer`(TCP)로 작업 사이클·DEV·영상을 흉내 내 Pi 없이 앱 시험 |
 | `VideoView` | 큐에서 JPEG 꺼내 표시 + 현재 상태 문구 겹쳐 그리기 (30ms 주기) |
@@ -538,51 +549,42 @@ classDiagram
 
 ## 6. 동작 흐름 예시 (시퀀스)
 
-### 분기점에서 하차 A 갈래 선택
+### 초기 설정 — 한 색 탐색
 ```mermaid
 sequenceDiagram
-    participant D as DriveNode
     participant M as MissionNode
     participant SM as MissionStateMachine
-    participant P as PanTiltNode
-    participant K as MarkerNode
-    D-->>M: /drive 결과 JUNCTION_T
-    M->>SM: Event DRIVE_DONE(JUNCTION_T)
-    SM-->>M: Action POSE(JUNCTION)
-    M->>P: /pantilt/pose JUNCTION
-    P-->>M: /pantilt/ready
-    M->>SM: Event POSE_READY
-    SM-->>M: Action DETECT_MARKERS
-    M->>K: /marker/detect
-    K-->>M: left=[red], right=[green], front=[]
-    M->>SM: Event MARKERS
-    Note over SM: target=DROP_A → red → left
-    SM-->>M: Action POSE(LINE), DRIVE(TURN_LEFT)
-    M->>P: /pantilt/pose LINE
-    M->>D: /drive TURN_LEFT
+    participant D as DriveNode
+    participant C as ClassifierNode
+    M->>SM: Event SETUP
+    Note over SM: explore = red (매핑에 없는 첫 색)
+    SM-->>M: Action TARGET(red), DIGIT(-), DRIVE(UTURN)
+    D-->>M: /drive 결과 UTURN_DONE
+    SM-->>M: Action DRIVE(FOLLOW_TO_EVENT)
+    Note over D: red 스티커 쪽으로 회전 (drive_node)
+    D-->>M: /drive 결과 STOP_LINE
+    SM-->>M: Action DRIVE(APPROACH)
+    Note over SM: 초음파 ≤ 20cm → POSE(SIGN) → CLASSIFY(SIGN)
+    C-->>M: sign_drop_a
+    M->>SM: Event SIGN(sign_drop_a)
+    SM-->>M: Action SAVE_MAP(DROP_A=red), REPORT(MAPPED DROP_A red)
+    Note over SM: 다음 색 green → TARGET(green), POSE(LINE), DRIVE(UTURN)
 ```
 
-### 작업장 적재
+### 작업 — 상차
 ```mermaid
 sequenceDiagram
     participant M as MissionNode
     participant SM as MissionStateMachine
-    participant U as UltrasonicNode
-    participant C as ClassifierNode
     participant L as LedNode
-    Note over SM: APPROACH (서행 중)
-    U-->>M: /ultrasonic/range 0.09m
-    M->>SM: Event RANGE(0.09)
-    SM-->>M: Action CANCEL_DRIVE, POSE(SIGN)
-    Note over SM: LOAD — 3초 유지 확인
-    U-->>M: 3초 동안 0.08~0.11m
-    M->>SM: Event TICK
-    SM-->>M: Action CLASSIFY(CARGO)
-    M->>C: /vision/classify CARGO
-    C-->>M: circle
-    M->>SM: Event CARGO(circle)
-    SM-->>M: Action LED(RED), REPORT(LOADED), POSE(LINE), DRIVE(UTURN)
+    participant S as SegmentNode
+    Note over SM: CHECK_SIGN — sign_work 확정, plan[0] = (CIRCLE, 3)
+    SM-->>M: Action LED(RED), DIGIT(1)
     M->>L: /led/state RED
+    M->>S: /display/digit 1
+    Note over SM: LOAD — 1초마다 load += 1
+    SM-->>M: Action DIGIT(2), DIGIT(3)
+    SM-->>M: Action REPORT(LOADED CIRCLE 3), POSE(LINE), TARGET(track_map[DROP_A]), DRIVE(UTURN)
 ```
 
 ---
@@ -597,6 +599,6 @@ sequenceDiagram
 | `PidController` | 계단 입력 → 출력 방향·크기 |
 | `DriveController` | 가짜 LineResult 순서 → 단계 전이, 시간 초과 |
 | `DriveController` 마커 | 왼쪽·오른쪽·양쪽·사라짐, 회전 끝 조건, 시간 초과 |
-| `MissionStateMachine` | 1사이클 이벤트 순서 → 기대 동작 목록, 장애물·비상 정지·오류 경로 |
+| `MissionStateMachine` | 초기 설정(4색 탐색·중복 오류·복귀), 작업(원·사각 순서, 0개 건너뜀, 1초 간격 개수) 이벤트 순서 → 기대 동작 목록, 장애물·비상 정지·오류 경로 |
 | `agv_protocol` | 명령·응답 문자열 왕복, 프레임 분할 수신 |
 | `MedianFilter` | None·이상값 제거 |

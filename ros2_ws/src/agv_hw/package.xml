@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>agv_hw</name>
-  <version>0.1.0</version>
+  <version>0.4.0</version>
   <description>하드웨어 드라이버(모터·서보·초음파·LED)와 하드웨어 노드</description>
   <maintainer email="noreply@example.com">logistics-automation team</maintainer>
   <license>MIT</license>

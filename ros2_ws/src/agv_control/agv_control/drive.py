@@ -1,7 +1,8 @@
 """주행 제어 (② 순수 로직) — 라인 상태 → /cmd_vel (functional_design F4·F5, class_design 3.1).
 
-지금 구현: FOLLOW_TO_EVENT(라인 따라가다 이벤트에서 정지), UTURN(제자리에서 돌아 왔던 라인을 다시 찾음), STOP.
-TURN·STRAIGHT·APPROACH는 S2·S7에서 추가.
+지금 구현: FOLLOW_TO_EVENT(라인 따라가다 이벤트에서 정지, skip_stop_lines만큼 정지선 통과),
+UTURN(제자리에서 돌아 왔던 라인을 다시 찾음), APPROACH(정지선 뒤 표지판까지 서행, 라인 이벤트 무시 — 멈추는 것은
+mission_node가 초음파로 취소), STOP. TURN·STRAIGHT는 쓰지 않음 (마커 회전은 FOLLOW 안에서).
 부호: 오프셋 + = 라인이 오른쪽 → 오른쪽으로 돌아야 함 → /cmd_vel z는 음수 (z > 0 = 왼쪽 회전, agv_hw.logic.mix).
 각도 보정: 라인 각도가 90° ± heading_deadband_deg(85~95°)를 벗어나면 벗어난 만큼 회전에 더함.
   각도 < 85 (위쪽이 오른쪽으로 기움) → 오른쪽으로, 각도 > 95 → 왼쪽으로.
@@ -62,6 +63,8 @@ class DriveConfig:
     turn_settle_s: float = 1.0      # 회전 후 이 시간은 정지선·코너·라인 끝을 무시 (분기점 가로선 재검출 방지)
     uturn_min_s: float = 1.5        # 유턴 시작 후 이 시간은 새 라인으로 인정 안 함 (정지선·옆 갈래에서 멈추지 않게)
     uturn_timeout_s: float = 8.0    # 이 시간 안에 라인을 못 찾으면 정지·E_TURN
+    approach_speed: float = 0.45    # 표지판 접근 속도 (TT 모터 시동 문턱 이상)
+    pass_clear_frames: int = 8      # 정지선 통과: 판정이 이만큼 연속 사라지면 지나간 것으로 봄
 
 
 @dataclass
@@ -152,6 +155,9 @@ class DriveController:
         self.turn_t = 0.0
         self.turn_frames = 0                # LEAVE: 라인이 안 보인 프레임 수, SEEK: 라인이 보인 프레임 수
         self.turn_offset = None             # LEAVE: 직전 라인 오프셋 (돌수록 기존 라인은 반대쪽으로 밀림)
+        self.skip_stop = 0                  # 남은 통과할 정지선 수 (유턴 뒤 1 — 방금 지점의 정지선)
+        self.passing = False                # 지금 정지선 위를 지나가는 중
+        self.pass_clear = 0                 # 통과 중 정지선 판정이 연속으로 없던 프레임 수
 
     @property
     def active(self) -> bool:
@@ -160,14 +166,16 @@ class DriveController:
     @property
     def phase(self) -> str:
         """지금 단계 — 앱 표시용. "FOLLOW", "RECHECK 2/3", "VERIFY STOP_LINE", "MARKER red", "TURN LEFT", "UTURN"."""
-        if self.command == DriveCommand.UTURN:
-            return "UTURN"
+        if self.command in (DriveCommand.UTURN, DriveCommand.APPROACH):
+            return self.command.value
         if self.check_t is not None:
             return f"MARKER {self.target}"
         if self.turn_dir:
             return "TURN LEFT" if self.turn_dir > 0 else "TURN RIGHT"
         if self.verify_t is not None:
             return f"VERIFY {self.verify_event.value}"
+        if self.passing:
+            return "PASS STOP_LINE"
         if self.recheck_t is None:
             return "FOLLOW"
         c = self.cfg
@@ -203,8 +211,9 @@ class DriveController:
         self.turn_dir = 0
         self.marker_near = False
 
-    def start(self, command: DriveCommand) -> None:
+    def start(self, command: DriveCommand, skip_stop_lines: int = 0) -> None:
         self.command = DriveCommand(command)
+        self.skip_stop, self.passing, self.pass_clear = int(skip_stop_lines), False, 0
         self.pid.reset()
         self.since_line = 0.0
         self.last = DriveOutput(0.0, 0.0)
@@ -224,7 +233,7 @@ class DriveController:
             return DriveOutput(0.0, 0.0)
         if self.command == DriveCommand.STOP:
             return self.cancel()
-        if self.command not in (DriveCommand.FOLLOW_TO_EVENT, DriveCommand.UTURN):
+        if self.command not in (DriveCommand.FOLLOW_TO_EVENT, DriveCommand.UTURN, DriveCommand.APPROACH):
             name, self.command = self.command.value, None
             return DriveOutput(0.0, 0.0, True, f"E_UNSUPPORTED_{name}")
 
@@ -241,6 +250,8 @@ class DriveController:
             return self._step_check(markers, dt)
         if self.turn_dir:
             return self._step_turn(line, dt)
+        if self.command == DriveCommand.APPROACH:
+            return self._step_approach(line, dt)
         self.cooldown = max(0.0, self.cooldown - dt)
         self.marker_ignore = max(0.0, self.marker_ignore - dt)
         self.event_ignore = max(0.0, self.event_ignore - dt)
@@ -248,6 +259,7 @@ class DriveController:
             return self.last
         if line is None:                       # 이번 주기엔 새 영상 없음 → 직전 출력 유지
             return self.last
+        line = self._pass_stop_line(line)
         if self.event_ignore <= 0.0:
             if line.event == LineEvent.LINE_END and self.cfg.recheck_tries > 0:
                 self.recheck_t, self.recheck_seen = 0.0, 0     # 멈춰서 다시 봄 — 주행 중 흔들림으로 놓쳤을 수 있음
@@ -263,12 +275,42 @@ class DriveController:
 
         c = self.cfg
         err = line.offset - c.center_offset                 # 라인이 기준 위치보다 오른쪽이면 +
-        heading = heading_error(line.angle, c.heading_deadband_deg) / 45.0 if line.angle_valid else 0.0
-        angular = _clip(-c.turn_scale * (self.pid.update(err, dt) + c.kh * heading), c.max_angular)
+        angular = self._steer(line, dt)
         linear = max(c.min_speed, c.speed * (1.0 - c.slow_gain * abs(err)))
         if line.raw_event != LineEvent.NONE or not line.line_found or self.marker_near:
             linear = min(linear, c.event_speed)          # 이벤트나 목적지 마커가 보이기 시작하면 감속
-        self.last = DriveOutput(round(linear, 3), round(angular, 3))
+        self.last = DriveOutput(round(linear, 3), angular)
+        return self.last
+
+    def _pass_stop_line(self, line: LineInput) -> LineInput:
+        """통과할 정지선이 남아 있으면 정지선 판정을 지우고 지나간다. 판정이 연속으로 사라지면 하나 지난 것."""
+        if self.skip_stop <= 0:
+            return line
+        seen = LineEvent.STOP_LINE in (line.event, line.raw_event)
+        if seen:
+            self.passing, self.pass_clear = True, 0
+        elif self.passing:
+            self.pass_clear += 1
+            if self.pass_clear >= self.cfg.pass_clear_frames:
+                self.skip_stop -= 1
+                self.passing = False
+        if not seen:
+            return line
+        drop = lambda e: LineEvent.NONE if e == LineEvent.STOP_LINE else e   # noqa: E731
+        return LineInput(line.offset, line.line_found, drop(line.event), drop(line.raw_event), line.angle, line.angle_valid)
+
+    def _steer(self, line: LineInput, dt: float) -> float:
+        c = self.cfg
+        err = line.offset - c.center_offset
+        heading = heading_error(line.angle, c.heading_deadband_deg) / 45.0 if line.angle_valid else 0.0
+        return round(_clip(-c.turn_scale * (self.pid.update(err, dt) + c.kh * heading), c.max_angular), 3)
+
+    def _step_approach(self, line: LineInput | None, dt: float) -> DriveOutput:
+        """표지판까지 서행 — 정지선·코너·라인 끝·마커를 모두 무시하고 라인을 따라감. 라인이 안 보이면(표지판 바로 앞) 직진."""
+        if line is None:
+            return self.last
+        angular = self._steer(line, dt) if line.line_found else 0.0
+        self.last = DriveOutput(round(self.cfg.approach_speed, 3), angular)
         return self.last
 
     def _step_recheck(self, line: LineInput | None, dt: float) -> DriveOutput:

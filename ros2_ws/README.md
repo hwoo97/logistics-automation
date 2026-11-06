@@ -6,12 +6,12 @@
 | 패키지 | 내용 | 시험 |
 |------|------|------|
 | `agv_protocol` | BT 메시지·영상 프레임·공통 타입 (순수 Python, 노트북 앱과 공용) | pytest 56 |
-| `agv_hw` | 드라이버(모터 DRV8835·서보 PCA9685·초음파·LED, 가짜 포함) + 노드 `motor_node` `pantilt_node` `ultrasonic_node` `led_node` | pytest 21 (모터 드라이버 4 포함) |
+| `agv_hw` | 드라이버(모터 DRV8835·서보 PCA9685·초음파·LED·7세그먼트, 가짜 포함) + 노드 `motor_node` `pantilt_node` `ultrasonic_node` `led_node` `segment_node` | pytest 21 (모터 드라이버 4 포함) |
 | `agv_bt` | `RfcommServer`, `BridgeCore`(명령 판단), `VideoStreamer`, `SysMonitor` + 노드 `bt_bridge_node` | pytest 14 (RfcommServer 4 포함) |
-| `agv_interfaces` | 메시지 `LineState`·`StopLineState`·`MarkerState`, 액션 `Drive`(command → success·result, 피드백 linear·angular·offset) — Status·Command는 상태 머신 작업 때 | — |
-| `agv_vision` | `LineDetector`(검정 = 어둡고 색 없음, 줄마다 가는 구간만 라인 후보 + 가운데·직전 위치·아래 닿음 가중치, 라인 각도(직선 맞춤), 이어진 영역만으로 코너·라인 끝, 3프레임 확인), `StopLineDetector`(세로 열 방식 정지선) + 노드 `line_node`(둘을 같은 프레임으로), `MarkerDetector`(2cm 색 스티커, 라인 기준 좌우) + 노드 `marker_node` | pytest 82 (합성 트랙 사진) |
-| `agv_control` | `PidController`·`DriveController`(FOLLOW_TO_EVENT·STOP, 오프셋 + 라인 각도 보정(85~95° 허용), 목적지 색 스티커 쪽으로 회전 — 유턴·접근은 다음 단계) + 노드 `drive_node`(액션 `/drive`, `/drive/speed`) | pytest 28 |
-| `agv_bringup` | `launch/s0_hw.launch.py`, `launch/s1_line.launch.py`(S0 + line_node + marker_node + drive_node), `config/params.yaml` | — |
+| `agv_interfaces` | 메시지 `LineState`·`StopLineState`·`MarkerState`·`Status`·`Command`, 서비스 `Classify`, 액션 `Drive`(command → success·result, 피드백 linear·angular·offset) — Status·Command는 상태 머신 작업 때 | — |
+| `agv_vision` | `LineDetector`(검정 = 어둡고 색 없음, 줄마다 가는 구간만 라인 후보 + 가운데·직전 위치·아래 닿음 가중치, 라인 각도(직선 맞춤), 이어진 영역만으로 코너·라인 끝, 3프레임 확인), `StopLineDetector`(세로 열 방식 정지선) + 노드 `line_node`(둘을 같은 프레임으로), `MarkerDetector`(2cm 색 스티커, 라인 기준 좌우) + 노드 `marker_node`, `TfliteClassifier`(Teachable Machine 표지판, LiteRT) + 노드 `classifier_node` | pytest 82 (합성 트랙 사진) |
+| `agv_control` | `PidController`·`DriveController`(FOLLOW_TO_EVENT·STOP, 오프셋 + 라인 각도 보정(85~95° 허용), 목적지 색 스티커 쪽으로 회전, 유턴, 표지판 접근, 유턴 뒤 정지선 통과), `MissionStateMachine`(초기 설정·작업) + 노드 `drive_node`, `mission_node`(액션 `/drive`, `/drive/speed`) | pytest 28 |
+| `agv_bringup` | `launch/s0_hw.launch.py`, `launch/s1_line.launch.py`(S0 + line_node + marker_node + drive_node), `launch/agv.launch.py`(전체 운용 — + classifier·mission, 브리지 mission 연동), `config/params.yaml`, `models/`(표지판 모델 넣는 곳) | — |
 
 ## 빌드 (Pi)
 ```bash

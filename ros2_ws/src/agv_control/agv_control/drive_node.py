@@ -170,8 +170,9 @@ class DriveNode(Node):
             self.finished.clear()
             self.result = ""
             self.line = self.markers = None
-            self.ctrl.start(DriveCommand(command))
-        self.get_logger().info(f"시작: {command}")
+            skip = int(goal_handle.request.skip_stop_lines)
+            self.ctrl.start(DriveCommand(command), skip)
+        self.get_logger().info(f"시작: {command}" + (f" (정지선 {skip}개 통과)" if skip else ""))
         feedback = Drive.Feedback()
         while not self.finished.wait(0.2):
             if goal_handle.is_cancel_requested:

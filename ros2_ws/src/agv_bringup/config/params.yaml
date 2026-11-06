@@ -42,6 +42,12 @@ led_node:
     green_pin: 26
     gpio_chip: -1
 
+segment_node:
+  ros__parameters:
+    pins: [4, 27, 12, 13, 9, 10, 11]   # a~g (pinmap.md, 2026-11-02) — 세그먼트마다 330Ω
+    common_anode: false         # 부품이 공통 애노드(공통 단자 → 3.3V)면 true
+    gpio_chip: -1
+
 line_node:
   ros__parameters:
     enabled: true
@@ -125,11 +131,32 @@ drive_node:
     uturn_min_s: 1.5            # 시작 후 이 시간은 새 라인으로 인정 안 함 — 실제 회전 속도에 맞춰 90°보다 조금 더 도는 시간으로
     uturn_timeout_s: 8.0        # 이 시간 안에 라인을 못 찾으면 정지·E_TURN
 
+classifier_node:
+  ros__parameters:
+    # 모델 파일 = Teachable Machine에서 내보낸 sign.tflite + labels_sign.txt → agv_bringup/models/ (비우면 설치 폴더 기본 경로)
+    frames: 5                   # 요청마다 새 영상 이만큼 추론
+    need: 3                     # 같은 라벨이 이만큼 이상이면 확정
+    min_score: 0.8
+    timeout_s: 3.0
+
+mission_node:
+  ros__parameters:
+    sign_distance: 0.18         # 표지판 앞 정지 거리(m) — 변경 시나리오 "약 18cm", S6에서 보정
+    sign_hits: 3                # 이만큼 연속 가까우면 정지
+    approach_timeout_s: 10.0    # 정지선 → 표지판 앞 시간 제한 (E_APPROACH)
+    item_interval_s: 1.0        # 상차·하차 1개 간격
+    obstacle_enabled: false     # 변경 시나리오: 장애물 없음 (켜면 주행 중 가까운 물체에서 멈춤)
+    obstacle_distance: 0.15     # 주행 중 장애물 거리
+    obstacle_clear_s: 1.0
+    sign_retry: 1
+    parked_s: 2.0
+    map_file: ~/.agv/track_map.json   # 트랙 매핑 저장 (초기 설정 결과)
+
 bt_bridge_node:
   ros__parameters:
     transport: rfcomm           # tcp 로 바꾸면 Wi-Fi/유선으로 노트북 앱 연결 시험 가능 (포트 tcp_port, 영상 +1)
     tcp_port: 9000
-    standalone: true            # mission_node 작성 전: 브리지가 IDLE·MANUAL·ESTOP 직접 관리
+    standalone: true            # s0·s1 시험: 브리지가 IDLE·MANUAL·ESTOP 직접 관리 / agv.launch.py는 false로 덮어씀
     video_fps: 5.0
     video_size: [320, 240]
     jpeg_quality: 50

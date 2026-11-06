@@ -1,6 +1,6 @@
 # AI 런타임 점검 — Teachable Machine 모델을 Pi에서 실행 (관문 G1)
 
-> 목표: Teachable Machine으로 만든 화물 모델(원·사각형·배경)을 Pi 5 + Ubuntu 24.04(Python 3.12)에서 **LiteRT**로 실행하고, 인식률·1회 추론 시간을 잰다.
+> 목표: Teachable Machine으로 만든 모델을 (원래 화물 모델로 준비 — 2026-11-02부터 실제로는 표지판 모델만 사용) Pi 5 + Ubuntu 24.04(Python 3.12)에서 **LiteRT**로 실행하고, 인식률·1회 추론 시간을 잰다.
 > 클래스·전처리·목표: [Teachable Machine 클래스](../../02_design/ai/tm_classes.md)
 
 ## 1. 모델 만들기 (PC 브라우저)

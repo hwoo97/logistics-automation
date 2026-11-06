@@ -66,10 +66,12 @@ def test_watch(core):
 def test_invalid_and_start_rejected(core):
     c, io = core
     c.on_line("DEV LED BLUE")
-    c.on_line("START 3")
+    c.on_line("START 3 2")
+    c.on_line("SETUP")
     naks = io.replies("NAK")
     assert naks[0]["command"] == "DEV LED" and "OFF/RED" in naks[0]["reason"]
     assert naks[1]["command"] == "START" and "mission_node" in naks[1]["reason"]
+    assert naks[2]["command"] == "SETUP" and "mission_node" in naks[2]["reason"]
 
 
 def test_stop_resume(core):
@@ -138,7 +140,7 @@ def test_heartbeat(core):
     assert io.calls.count(("estop", True)) == 1
     io.sent.clear()
     c.on_connect()
-    assert [r["type"] for r in io.replies()] == ["STATUS", "ERROR"]
+    assert [r["type"] for r in io.replies()] == ["STATUS", "MAP", "ERROR"]
     c.on_line("RESUME")
     c.on_connect()
     assert io.replies("ERROR") and len(io.replies("ERROR")) == 1   # 재개 후에는 E_LINK 없음
@@ -147,10 +149,23 @@ def test_heartbeat(core):
 def test_mission_mode_forwards():
     io = FakeIO()
     c = BridgeCore(io, standalone=False)
-    c.on_line("START 3")
-    assert io.calls[-1][0] == "mission" and io.calls[-1][1].line() == "START 3"
-    c.on_mission_status("NAVIGATE", 0, 3, "NONE", "WORK")
-    assert c.state == "NAVIGATE" and io.sent[-1] == "STATUS NAVIGATE 0/3 NONE WORK"
+    c.on_line("START 3 2")                             # 매핑 전에는 거부
+    assert io.replies("NAK")[-1]["reason"] == "초기 설정 필요" and not io.calls
+    c.on_line("SETUP")
+    assert io.calls[-1][1].line() == "SETUP"
+    track = {"WORK": "blue", "DROP_A": "red", "DROP_B": "green", "PARK": "yellow"}
+    c.on_mission_status("NAVIGATE", "WORK", 0, 5, "NONE", 0, "WORK", track)
+    assert c.state == "NAVIGATE" and io.sent[-2] == "MAP WORK=blue DROP_A=red DROP_B=green PARK=yellow"
+    assert io.sent[-1] == "STATUS NAVIGATE WORK 0/5 NONE 0 WORK"
+    n = len(io.sent)
+    c.on_mission_status("NAVIGATE", "WORK", 0, 5, "NONE", 0, "WORK", track)      # 같으면 보내지 않음
+    assert len(io.sent) == n
+    c.on_mission_status("NAVIGATE", "WORK", 0, 5, "CIRCLE", 1, "WORK", track)    # 개수만 바뀌어도 보냄
+    assert io.sent[-1] == "STATUS NAVIGATE WORK 0/5 CIRCLE 1 WORK"
+    c.on_mission_status("IDLE", "NONE", 0, 0, "NONE", 0, "NONE", track)
+    c.on_line("START 3 2")                             # 매핑 후에는 넘김
+    assert io.calls[-1][0] == "mission" and io.calls[-1][1].line() == "START 3 2"
+    c.on_mission_status("UTURN", "WORK", 0, 5, "NONE", 0, "WORK", track)
     c.on_line("DEV LED RED")                           # 작업 중 DEV 거부
     assert io.replies("NAK")[-1]["command"] == "DEV LED"
     c.on_line("STOP")

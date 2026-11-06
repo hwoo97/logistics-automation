@@ -4,7 +4,7 @@ package_name = "agv_hw"
 
 setup(
     name=package_name,
-    version="0.1.0",
+    version="0.4.0",
     packages=[package_name, package_name + ".drivers"],
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
@@ -12,7 +12,7 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    description="하드웨어 드라이버(모터·서보·초음파·LED)와 하드웨어 노드",
+    description="하드웨어 드라이버(모터·서보·초음파·LED·7세그먼트)와 하드웨어 노드",
     license="MIT",
     tests_require=["pytest"],
     entry_points={
@@ -21,6 +21,7 @@ setup(
             "pantilt_node = agv_hw.pantilt_node:main",
             "ultrasonic_node = agv_hw.ultrasonic_node:main",
             "led_node = agv_hw.led_node:main",
+            "segment_node = agv_hw.segment_node:main",
         ],
     },
 )

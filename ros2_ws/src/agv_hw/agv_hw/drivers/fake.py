@@ -1,5 +1,5 @@
 """가짜 드라이버 — 하드웨어 없이 노드를 시험 (`use_fake_hw: true`). 호출 내용을 history에 남긴다."""
-from .base import MotorDriver, ServoDriver, UltrasonicDriver, LedDriver
+from .base import MotorDriver, ServoDriver, UltrasonicDriver, LedDriver, SegmentDriver
 
 
 class FakeMotorDriver(MotorDriver):
@@ -48,3 +48,13 @@ class FakeLedDriver(LedDriver):
     def set(self, red, green):
         self.state = (bool(red), bool(green))
         self.history.append(("set", bool(red), bool(green)))
+
+
+class FakeSegmentDriver(SegmentDriver):
+    def __init__(self, *args, **kwargs):
+        self.history: list = []
+        self.bits = (0,) * 7
+
+    def set(self, bits):
+        self.bits = tuple(int(bool(b)) for b in bits)
+        self.history.append(("set", self.bits))

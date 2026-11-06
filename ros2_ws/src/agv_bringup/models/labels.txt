@@ -1,0 +1,5 @@
+0 HOME
+1 BOTTLE
+2 BOX
+3 LOAD
+4 none

@@ -63,6 +63,16 @@ class BtBridgeNode(Node):
             self.create_subscription(MarkerState, "/marker/state", self.on_marker_state, best_effort)
         except ImportError:
             self.get_logger().warn("agv_interfaces 없음 — DEV LINE 보내지 않음")
+        self.pub_mission = None                               # standalone=False: mission_node 연결
+        if not standalone:
+            try:
+                from agv_interfaces.msg import Command, Status
+                self.Command = Command
+                self.pub_mission = self.create_publisher(Command, "/mission/command", q10)
+                self.create_subscription(Status, "/mission/status", self.on_mission_status, QoSProfile(depth=1))
+                self.create_subscription(String, "/mission/report", self.on_mission_report, q10)
+            except ImportError:
+                self.get_logger().error("agv_interfaces 없음 — mission_node와 연결 못 함")
         self.drive_client, self._drive_goal = None, None    # 노트북 앱 "라인 주행 시작/정지" → /drive 액션
         self._drive_phase = "FOLLOW"
         try:
@@ -176,7 +186,29 @@ class BtBridgeNode(Node):
         return self.get_node_names()
 
     def mission(self, cmd):
-        self.get_logger().error(f"mission_node 연동 전 (standalone=False 미지원): {cmd.line()}")
+        """standalone=False — 명령을 /mission/command로 넘긴다 (상태는 /mission/status로 돌아옴)."""
+        if self.pub_mission is None:
+            self.get_logger().error(f"agv_interfaces 없음 — {cmd.line()} 보내지 못함")
+            return
+        msg = self.Command(kind=cmd.kind if cmd.kind != "MANUAL" else f"MANUAL_{cmd.args[0]}")
+        if cmd.kind == "START":
+            msg.circle, msg.square = int(cmd.args[0]), int(cmd.args[1])
+        elif cmd.kind == "MOVE":
+            msg.linear, msg.angular = float(cmd.args[0]), float(cmd.args[1])
+        self.pub_mission.publish(msg)
+
+    def on_mission_status(self, msg):
+        track = {}
+        for item in msg.map:
+            target, _, color = item.partition("=")
+            track[target] = None if color in ("", "-") else color
+        with self.lock:
+            self.core.on_mission_status(msg.state, msg.mode, msg.done, msg.total, msg.cargo, msg.load, msg.target,
+                                        {k: v for k, v in track.items() if v})
+
+    def on_mission_report(self, msg):
+        if self.server.connected:
+            self.send(msg.data)                                 # EVENT·ERROR 한 줄 (mission_node가 형식을 맞춤)
 
     # ── 통신 콜백 (서버 스레드) ────────────────────────────
 

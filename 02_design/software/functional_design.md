@@ -1,6 +1,6 @@
 # 기능 설계서 — 차량 소프트웨어 (ROS 2)
 
-> 대상 하드웨어: PiCar-R5 키트(Raspberry Pi 5, DRV8835 × 2, PCA9685, TT 모터 4개, 팬틸트) + Camera Module 3 Wide + 브레드보드(초음파, LED 2개)
+> 대상 하드웨어: PiCar-R5 키트(Raspberry Pi 5, DRV8835 × 2, PCA9685, TT 모터 4개, 팬틸트) + Camera Module 3 Wide + 브레드보드(초음파, LED 2개, 7세그먼트 1자리)
 > 소프트웨어: Ubuntu 24.04 LTS · ROS 2 Jazzy · Python(rclpy) / 노트북 Python 앱
 > 관련 문서: [핀맵](../hardware/pinmap.md) · [배선도](../hardware/wiring.md) · [테스트 트랙](../track/test_track.md) · [블루투스 규약](../communication/bluetooth_protocol.md) · [AI 클래스](../ai/tm_classes.md)
 
@@ -16,13 +16,13 @@
 | F4 | 라인 추종·이벤트 검출 | 카메라 | `line_node` + `drive_node` | S1~S3 |
 | F5 | 직각 회전·유턴 | 모터 + 카메라 | `drive_node` | S2, S8 |
 | F6 | 색 마커 판별 | 카메라 | `marker_node` | S4, S5 |
-| F7 | 화물·표지판 인식 (AI) | 카메라 | `classifier_node` | S6, S7 |
-| F8 | 거리 측정 (적재·장애물) | HC-SR04 (GPIO 5·6) | `ultrasonic_node` | S0, S7, S9 |
-| F9 | 적재 상태 표시 | LED 빨강·초록 (GPIO 16·26) | `led_node` | S0, S7 |
+| F7 | 표지판 인식 (AI) | 카메라 | `classifier_node` | S6 |
+| F8 | 거리 측정 (표지판 앞 정지·장애물) | HC-SR04 (GPIO 5·6) | `ultrasonic_node` | S0, S6, S9 |
+| F9 | 실은 화물 모양 표시 | LED 빨강·초록 (GPIO 16·26) | `led_node` | S0, S7 |
 | F10 | 블루투스 제어·상태 보고 | Pi 5 내장 BT | `bt_bridge_node` | S0, S10 |
 | F11 | 블루투스 영상 전송 | Pi 5 내장 BT | `bt_bridge_node` | S0 |
-| F12 | 물류 처리 (상태 머신) | — | `mission_node` | S10 |
-| F13 | (옵션) LCD 작업 횟수 | I2C LCD (GPIO 2·3 공유) | `lcd_node` | — |
+| F12 | 물류 처리 (상태 머신: 초기 설정·작업) | — | `mission_node` | S10 |
+| F13 | 실은 화물 개수 표시 | 7세그먼트 1자리 (GPIO 4·27·12·13·9·10·11) | `segment_node` | S0, S7 |
 
 ---
 
@@ -38,14 +38,15 @@
  │                                                                    ▼  │      │
  │  ultrasonic_node ──/ultrasonic/range──► mission_node ◄────────► motor_node   │
  │                                         │  ▲   │                             │
- │  pantilt_node ◄──/pantilt/pose──────────┘  │   └──/led/state──► led_node     │
+ │  pantilt_node ◄──/pantilt/pose──────────┘  │   ├──/led/state──► led_node     │
+ │                                            │   └──/display/digit──► segment_node │
  │                                            │                                 │
  │  bt_bridge_node ◄──/mission/status─────────┘                                 │
  │       │  └──/mission/command, /safety/estop──►                               │
  └───────┼──────────────────────────────────────────────────────────────────────┘
          │ Bluetooth RFCOMM (채널 1: 제어 / 채널 2: 영상)
  ┌───────┴──────── 노트북 Python 앱 ────────┐
- │  작업 횟수 입력 · 비상 정지 · 수동 제어 · 상태 표시 · 영상 표시 │
+ │  초기 설정 · 화물 개수 입력 · 비상 정지 · 수동 제어 · 매핑·상태·영상 표시 │
  └──────────────────────────────────────────┘
 ```
 
@@ -61,7 +62,7 @@
 | 패키지 | 빌드 | 내용 |
 |--------|------|------|
 | `agv_interfaces` | ament_cmake | 사용자 정의 메시지·서비스 (`.msg`, `.srv`) — 인터페이스 패키지는 CMake 필수 |
-| `agv_hw` | ament_python | `motor_node`, `pantilt_node`, `ultrasonic_node`, `led_node` (lgpio, smbus2) |
+| `agv_hw` | ament_python | `motor_node`, `pantilt_node`, `ultrasonic_node`, `led_node`, `segment_node` (lgpio, smbus2) |
 | `agv_vision` | ament_python | `line_node`, `marker_node`, `classifier_node` (OpenCV, LiteRT) |
 | `agv_control` | ament_python | `drive_node`, `mission_node` |
 | `agv_bt` | ament_python | `bt_bridge_node` (Python socket RFCOMM) |
@@ -84,8 +85,10 @@
 | `/pantilt/pose` | std_msgs/String | mission_node → pantilt_node | 이벤트 | `LINE` / `JUNCTION` / `SIGN` |
 | `/pantilt/ready` | std_msgs/String | pantilt_node → mission_node | 이벤트 | 자세 변경 후 안정화 완료 (자세 이름) |
 | `/led/state` | std_msgs/String | mission_node → led_node | 이벤트 | `OFF` / `RED` / `GREEN` / `ERROR` |
-| `/mission/command` | agv_interfaces/Command | bt_bridge → mission_node | 이벤트 | START n, STOP, RESUME, MANUAL, MOVE |
-| `/mission/status` | agv_interfaces/Status | mission_node → bt_bridge | 2Hz + 변화 시 | 상태, 작업 횟수, 화물, 목적지 |
+| `/display/digit` | std_msgs/String | mission_node → segment_node | 이벤트 | 7세그먼트 한 글자: `0`~`9`, `-`(초기 설정 중), `E`(오류), 빈칸(끔) |
+| `/mission/command` | agv_interfaces/Command | bt_bridge → mission_node | 이벤트 | SETUP, START 원 사각, STOP, RESUME, MANUAL, MOVE |
+| `/mission/status` | agv_interfaces/Status | mission_node → bt_bridge | 2Hz + 변화 시 | 상태, 진행, 실은 화물·개수, 목적지, 트랙 매핑 |
+| `/mission/report` | std_msgs/String | mission_node → bt_bridge | 이벤트 | 블루투스 `EVENT`·`ERROR` 한 줄 (브리지가 그대로 전송) |
 | `/safety/estop` | std_msgs/Bool | bt_bridge·mission → motor_node | 이벤트 | 비상 정지 래치 |
 | `/dev/wheels` | std_msgs/Float32MultiArray | bt_bridge → motor_node | 0.3초 반복 | 개발자 탭: L1~L4 듀티 (-1~1), 워치독 적용 |
 | `/drive/speed` | std_msgs/Float32 | bt_bridge → drive_node | 이벤트 | 개발자 탭 "주행 속도": 라인 주행 기본 선속도 (0.2~1.0), 주행 중에도 적용 |
@@ -97,8 +100,8 @@
 ### 서비스 / 액션
 | 이름 | 종류 | 제공 | 요청 → 응답 |
 |------|------|------|-------------|
-| `/drive` | 액션 `agv_interfaces/Drive` | drive_node | 동작(`FOLLOW_TO_EVENT`, `TURN_LEFT`, `TURN_RIGHT`, `STRAIGHT`, `UTURN`, `APPROACH`, `STOP`) → 결과 이벤트·성공 여부 |
-| `/vision/classify` | 서비스 `agv_interfaces/Classify` | classifier_node | 모드(`CARGO` / `SIGN`) → 라벨, 신뢰도 |
+| `/drive` | 액션 `agv_interfaces/Drive` | drive_node | 동작(`FOLLOW_TO_EVENT` + 통과할 정지선 수, `UTURN`, `APPROACH`, `STOP`) → 결과 이벤트·성공 여부, 피드백 단계(`PASS STOP_LINE` 등) |
+| `/vision/classify` | 서비스 `agv_interfaces/Classify` | classifier_node | 모드(`SIGN`) → 라벨, 신뢰도 |
 
 ### 사용자 정의 메시지 (agv_interfaces)
 ```
@@ -123,20 +126,25 @@ float32[] y              # 화면 높이 — 클수록 차에 가까움
 
 # Status.msg
 string state            # 상태 머신 상태 이름
-uint8  done             # 완료한 작업 수
-uint8  total            # 입력한 작업 수
-string cargo            # NONE / CIRCLE / SQUARE
-string target           # WORK / DROP_A / DROP_B / PARK
+string mode             # NONE / SETUP / WORK
+uint8  done             # 작업: 하차한 화물 수 / 초기 설정: 확인한 지점 수
+uint8  total            # 작업: 입력한 화물 수(원 + 사각) / 초기 설정: 4
+string cargo            # 실은 화물 NONE / CIRCLE / SQUARE
+uint8  load             # 실은 개수 (7세그먼트와 같음)
+string target           # 작업: WORK / DROP_A / DROP_B / PARK, 초기 설정: 탐색 중인 색
+string[] map            # 트랙 매핑 "WORK=blue" 4개, 모르면 "WORK=-"
 string message          # 오류·알림 문구
 
 # Command.msg  (bt_bridge → mission_node)
-string kind             # START / STOP / RESUME / MANUAL_ON / MANUAL_OFF / MOVE
-uint8  total            # START일 때 작업 횟수
+string kind             # SETUP / START / STOP / RESUME / MANUAL_ON / MANUAL_OFF / MOVE
+uint8  circle           # START일 때 적(원) 수량 (0~99)
+uint8  square           # START일 때 녹(사각) 수량 (0~99)
 float32 linear          # MOVE일 때 선속도 (-1.0 ~ 1.0)
 float32 angular         # MOVE일 때 회전 (-1.0 ~ 1.0)
 
 # Drive.action
-string command          # FOLLOW_TO_EVENT / TURN_LEFT / TURN_RIGHT / STRAIGHT / UTURN / APPROACH / STOP
+string command          # FOLLOW_TO_EVENT / UTURN / APPROACH / STOP
+uint8  skip_stop_lines  # FOLLOW_TO_EVENT: 멈추지 않고 지나갈 정지선 수 (유턴 뒤 1)
 ---
 bool   success
 string result           # 끝난 이유: STOP_LINE / JUNCTION_* / CORNER_* / TURN_DONE / UTURN_DONE / STOPPED / E_TURN / E_LINE
@@ -144,7 +152,7 @@ string result           # 끝난 이유: STOP_LINE / JUNCTION_* / CORNER_* / TUR
 float32 offset          # 진행 중 피드백: 현재 라인 오프셋
 
 # Classify.srv
-string mode             # CARGO / SIGN
+string mode             # SIGN (화물 모양은 입력값을 쓰므로 인식하지 않음, 2026-11-02)
 ---
 string label            # 확정 라벨, 미확정이면 빈 문자열
 float32 score
@@ -154,46 +162,62 @@ float32 score
 
 ## 5. 상태 머신 (`mission_node`)
 
+두 가지 모드로 같은 상태를 쓴다 (2026-11-02 사양 변경).
+- **초기 설정(SETUP)**: 4색을 하나씩 목적지 색으로 정해 따라가 표지판을 읽고, 색 ↔ 지점 대응(트랙 매핑)을 저장한다
+- **작업(WORK)**: 입력한 모양별 개수만큼 상차 → 하차를 모양 하나씩 반복하고 대기장소로 돌아온다
+
 ```mermaid
 stateDiagram-v2
     [*] --> IDLE
-    IDLE --> UTURN : START n (목적지=작업장, 대기장소 표지판을 보고 서 있으므로 먼저 유턴)
-    NAVIGATE --> CHECK_SIGN : 정지선 도착
-    CHECK_SIGN --> APPROACH : 작업장 표지판
-    CHECK_SIGN --> UNLOAD : 하차 A/B 표지판
-    CHECK_SIGN --> PARKED : 대기장소 표지판
-    APPROACH --> LOAD : 적재 거리 도달
-    LOAD --> UTURN : 화물 인식 (목적지=하차 A/B)
-    UNLOAD --> UTURN : 하차 완료 (목적지=작업장 또는 대기장소)
-    UTURN --> NAVIGATE
-    PARKED --> IDLE : 작업 종료 보고
+    IDLE --> UTURN : SETUP / START 원 사각 (대기장소 표지판을 보고 서 있으므로 먼저 유턴)
+    UTURN --> NAVIGATE : 라인 재인식 (유턴 뒤 첫 정지선은 통과)
+    NAVIGATE --> APPROACH : 정지선 도착
+    APPROACH --> CHECK_SIGN : 초음파 ≤ 표지판 앞 정지 거리
+    CHECK_SIGN --> UTURN : 초기 설정 — 지점 저장, 다음 색
+    CHECK_SIGN --> LOAD : 작업 — 상차 지점
+    CHECK_SIGN --> UNLOAD : 작업 — 하차 지점
+    CHECK_SIGN --> PARKED : 대기장소 (초기 설정 완료·작업 완료)
+    LOAD --> UTURN : n개 상차 (목적지 = 그 모양 하차 지점)
+    UNLOAD --> UTURN : n개 하차 (목적지 = 남은 모양 있으면 상차 지점, 없으면 대기장소)
+    PARKED --> IDLE : 완료 보고
 
     NAVIGATE --> PAUSED_OBSTACLE : 장애물
     PAUSED_OBSTACLE --> NAVIGATE : 1초간 장애물 없음
-    NAVIGATE --> ERROR : 마커 판단 불가 / 라인 이탈
-    CHECK_SIGN --> ERROR : 표지판 불일치
-    LOAD --> ERROR : 화물 인식 실패 (재시도 초과)
+    NAVIGATE --> ERROR : 라인 이탈·회전 실패
+    APPROACH --> ERROR : 시간 초과
+    CHECK_SIGN --> ERROR : 표지판 미인식·불일치·매핑 중복
     ERROR --> NAVIGATE : RESUME
 ```
 
 - **공통 상태 (모든 상태에서 진입)**: `ESTOP`(BT 비상 정지·연결 끊김 → 모터 정지, RESUME 시 이전 상태로), `MANUAL`(BT 수동 제어, 해제 시 IDLE)
-- `NAVIGATE`는 목적지(`target`)를 가지고 정지선에 도착할 때까지 라인 추종 + 분기점 판단을 반복하는 상위 상태 (구현에서는 분기점 처리를 `AT_JUNCTION` 상태로 분리 — [클래스 설계](class_design.md) 3.2)
+- `NAVIGATE`는 목적지 색을 `/drive/target`에 정하고 정지선까지 라인 추종 — 분기점 판단(색 스티커 좌우)과 회전은 `drive_node`가 한다 (6절, F6)
 
 ### 상태별 동작
 | 상태 | 진입 시 동작 | 종료 조건 | 다음 |
 |------|-------------|-----------|------|
-| IDLE | 모터 정지, LED OFF, 팬틸트 LINE | START n 수신 | target=WORK → UTURN (출발 위치 = 대기장소 정지선, 표지판 방향) |
-| NAVIGATE | 팬틸트 LINE, `/drive FOLLOW_TO_EVENT` | 이벤트 수신 | 아래 6절 |
-| CHECK_SIGN | 정지, 팬틸트 SIGN, `/vision/classify SIGN` | 표지판 확인 | 표지판 = 기대 목적지 → 해당 상태 / 불일치 → ERROR |
-| APPROACH | 팬틸트 LINE, `/drive APPROACH`(서행, **라인 이벤트 무시** — 방금 멈춘 작업장 정지선 위를 지나가므로) | 초음파 ≤ 적재 거리 | LOAD |
-| LOAD | 정지, 3초 동안 거리 유지 확인 + 팬틸트 SIGN, `/vision/classify CARGO` | 3초 유지 + 화물 확정 | LED RED/GREEN, target = DROP_A/B, **skip_stop_lines = 1**(돌아 나가며 작업장 정지선을 다시 지남) → UTURN |
-| UNLOAD | 정지, LED OFF, 2초 대기(하차 연출), done += 1 | 대기 끝 | target = (done < total ? WORK : PARK) → UTURN |
-| UTURN | 팬틸트 LINE, `/drive UTURN` | 라인 재인식 | NAVIGATE |
-| PARKED | 정지, 완료 보고(BT) | 보고 완료 | IDLE |
+| IDLE | 모터 정지, LED OFF, 7세그먼트 0, 팬틸트 LINE | `SETUP` 또는 `START 원 사각` 수신 | UTURN (출발 위치 = 대기장소, 표지판 방향) |
+| NAVIGATE | 팬틸트 LINE, `/drive/target` = 목적지 색, `/drive FOLLOW_TO_EVENT` | 이벤트 수신 | 아래 6절 |
+| APPROACH | `/drive APPROACH`(서행, **라인 이벤트 무시** — 방금 멈춘 정지선 위를 지나가므로) | 초음파 ≤ 표지판 앞 정지 거리 / 시간 초과 | CHECK_SIGN / ERROR(`E_APPROACH`) |
+| CHECK_SIGN | 정지, 팬틸트 SIGN, 자세 안정 후 `/vision/classify SIGN` | 표지판 확정 | 모드별 (아래) / 미인식 → ERROR(`E_SIGN`) |
+| LOAD | 정지, 1초에 1개씩 `load` += 1 → 7세그먼트 표시, 첫 1개에 LED(물품 색) 켬 | `load` = 이번 적재량(최대 9) | 팬틸트 LINE → UTURN, 목적지 = 그 모양 하차 지점 |
+| UNLOAD | 정지, 1초에 1개씩 `load` −= 1, `done` += 1 → 7세그먼트 표시 | `load` = 0 → LED 끔 | 팬틸트 LINE → UTURN, 목적지 = 남은 모양 있으면 WORK, 없으면 PARK |
+| UTURN | 팬틸트 LINE, `/drive UTURN`, `skip_stop_lines = 1` | 라인 재인식 | NAVIGATE |
+| PARKED | 정지(유턴 없음 — 다음 출발 자세), 완료 보고(BT) | 보고 완료 | IDLE |
 | PAUSED_OBSTACLE | 정지, 상태 보고 | 1초 연속 장애물 없음 | 이전 동작 재개 |
-| ERROR | 정지, LED ERROR(깜빡임), BT로 오류 코드 전송 | RESUME | 이전 상태 재시도 |
+| ERROR | 정지, LED ERROR(깜빡임), 7세그먼트 `E`, BT로 오류 코드 전송 | RESUME | 이전 상태 재시도 |
 
----
+### CHECK_SIGN 이후 — 모드별
+| 모드 | 읽은 표지판 | 동작 |
+|---|---|---|
+| 초기 설정 | 처음 보는 지점 | `map[지점] = 탐색 중인 색` 저장·보고 → 남은 색이 있으면 다음 색으로 UTURN, 없으면 아래 |
+| 초기 설정 | 이미 다른 색으로 저장된 지점 | ERROR(`E_MAP` — 색 스티커 누락·잘못 붙임) |
+| 초기 설정 | 4색 확인 끝 | 지금 지점이 대기장소면 PARKED(완료), 아니면 대기장소 색으로 UTURN → 도착 후 PARKED |
+| 작업 | 기대 목적지와 같음 | 상차 지점 → LOAD / 하차 지점 → UNLOAD / 대기장소 → PARKED |
+| 작업 | 기대 목적지와 다름 | ERROR(`E_SIGN`) |
+
+- **초기 설정 규칙**: 출발 지점(대기장소)의 표지판은 출발 전에 이미 앞에 있으므로 첫 유턴 전에 읽어 둔다. 탐색 순서는 빨강 → 초록 → 파랑 → 노랑 고정, 이미 대응을 아는 색은 건너뛴다
+- **매핑 저장**: Pi의 파일(`~/.agv/track_map.json`)에 저장해 다시 켜도 유지. 트랙을 바꾸면 초기 설정을 다시 한다. `START`는 4지점 매핑이 모두 있어야 받는다
+- **작업 순서 (변경 시나리오 2026-11-03)**: 먼저 운반할 물품은 무작위, 한 물품을 다 옮긴 뒤 다음 물품. 1회 최대 9개라 넘으면 9개씩 여러 번 `WORK → DROP` 왕복, 마지막 하차 뒤 PARK(Start). 예: 적 12·녹 5, 녹 먼저 → 녹 5 / 적 9 / 적 3
 
 ## 6. 주행 · 분기점 판단
 
@@ -202,17 +226,16 @@ stateDiagram-v2
 FOLLOW_TO_EVENT ─► 이벤트?
    ├ CORNER_LEFT / CORNER_RIGHT ─► 정지 → 같은 방향 90° 회전 → FOLLOW 재개
    ├ 목적지 색 스티커 ─► 감속 → 정지·좌우 확정 → 왼쪽만 좌회전 / 오른쪽만 우회전 / 양쪽 직진 → FOLLOW 재개 (drive_node가 처리, 2026-11-02)
-   ├ STOP_LINE ─► skip_stop_lines > 0 이면 1 줄이고 통과 / 아니면 정지 → CHECK_SIGN
+   ├ STOP_LINE ─► skip_stop_lines > 0 이면 1 줄이고 통과 / 아니면 정지 → APPROACH → CHECK_SIGN
    └ LINE_END (정지선 없이 끝) / 라인 이탈 ─► ERROR
 ```
 
 ### 이벤트 중복 검출 방지
 | 상황 | 문제 | 규칙 |
 |------|------|------|
-| 작업장에서 적재 후 유턴 | 이미지판과 분기점 사이의 **작업장 정지선**을 다시 지나며 CHECK_SIGN에 잘못 들어감 | LOAD에서 `skip_stop_lines = 1` → 다음 정지선 1개 통과 |
-| 작업장 정지선 → 이미지판 접근 | 멈춘 정지선 위를 바로 지나감 | APPROACH 중에는 라인 이벤트 무시 |
+| 지점에서 유턴 후 되돌아감 | 표지판과 분기점 사이의 **그 지점 정지선**을 다시 지나며 APPROACH에 잘못 들어감 | 모든 UTURN에서 `skip_stop_lines = 1` → 다음 정지선 1개 통과 (지점마다 정지선이 하나라 항상 맞음) |
+| 정지선 → 표지판 접근 | 멈춘 정지선 위를 바로 지나감 | APPROACH 중에는 라인 이벤트 무시 |
 | 분기점에서 직진·회전 직후 | 같은 분기점의 가로 라인을 다시 이벤트로 검출 | `drive_node`는 STRAIGHT·TURN 완료 후 라인 이벤트가 사라질 때까지(최소 0.5초) 새 이벤트 무시 |
-| 하차 지점·대기장소 유턴 | 정지선이 유턴 후 차량 뒤쪽에 있음 | 규칙 불필요 (S8에서 확인) |
 
 ### 분기점 판단 (색 마커 규칙, 2026-11-02 결정)
 목적지 색 스티커의 **라인 기준 위치**가 방향을 정한다. 스티커는 분기점에 들어오는 라인의 옆에 붙인다.
@@ -241,9 +264,9 @@ FOLLOW_TO_EVENT ─► 이벤트?
 - 자세 3가지 (각도는 S0·S6에서 보정, `params.yaml`)
   | 자세 | 용도 | 틸트 |
   |---|---|---|
-  | LINE | 주행 중 라인·정지선·분기점 검출 | 아래 |
-  | JUNCTION | 분기점에서 갈래 마커 보기 | 약간 아래 (갈래 3개가 한 화면에) |
-  | SIGN | 표지판·화물 인식 | 정면 |
+  | LINE | 주행 중 라인·정지선·색 마커 검출, 유턴 | 아래 |
+  | JUNCTION | (사용 안 함 — 2026-11-02 마커를 LINE 자세로 봄, 개발자 탭 시험용으로만 남김) | 약간 아래 |
+  | SIGN | 표지판 인식 | 정면 |
 - 자세 변경 후 0.3초 안정화 대기
 - GPIO17: 제어 없이 서보 동작 확인(2026-10-26) → 필수 아님. 드라이버는 안전하게 시작 시 LOW 출력(OE라면 출력 활성, 아니면 영향 없음)
 
@@ -296,29 +319,34 @@ FOLLOW_TO_EVENT ─► 이벤트?
   4. 회전 뒤 1초는 정지선·코너·라인 끝 무시, 직진·회전 뒤 2초는 마커 무시 (같은 표시 재인식 방지)
 - 전진 시간은 스티커 위치와 실제 속도에 맞춰 앱 "회전 전 전진"으로 조정
 
-### F7 · 화물·표지판 인식 (`classifier_node`)
+### F7 · 표지판 인식 (`classifier_node`)
 - Teachable Machine 이미지 모델 → TFLite 변환 → LiteRT(`ai-edge-litert`)로 추론, 입력 224×224
-- 모델 2개: 모드 CARGO → `cargo.tflite`(`circle` / `square` / `background`), 모드 SIGN → `sign.tflite`(`sign_work` / `sign_drop_a` / `sign_drop_b` / `sign_park` / `background`)
-- 5프레임 연속 추론 → 신뢰도 0.8 이상이 3회 이상 같은 라벨이면 확정, 아니면 실패
-- 화물 인식 실패 시 2회 재시도 → 그래도 실패면 ERROR(BT 알림) — 클래스 상세는 [tm_classes.md](../ai/tm_classes.md)
+- 모델 1개: `sign.tflite`(`sign_work` / `sign_drop_a` / `sign_drop_b` / `sign_park` / `background`). 화물 모양은 앱 입력값을 쓰므로 인식하지 않음 (2026-11-02)
+- 5프레임 연속 추론 → 신뢰도 0.8 이상이 3회 이상 같은 라벨이면 확정, 아니면 1회 재시도 후 실패(`E_SIGN`, 초기 설정 중이면 `E_MAP`) — 클래스 상세는 [tm_classes.md](../ai/tm_classes.md)
 
 ### F8 · 초음파 (`ultrasonic_node`, 해석은 `mission_node`)
 - 15Hz 측정(Trig 10µs 펄스 → Echo 펄스 폭), 이동 중앙값 필터 5개, 범위 밖(2cm 미만·200cm 초과)은 무시
 - 해석은 상태에 따라 다름
   | 상태 | 해석 | 기준 (파라미터, S7·S9에서 보정) |
   |---|---|---|
-  | APPROACH / LOAD | 적재 거리 | 거리 ≤ 10cm 를 3초 유지 (±2cm) |
-  | NAVIGATE, UTURN | 장애물 | 거리 ≤ 15cm → PAUSED_OBSTACLE, 1초 연속 해제 시 재개 |
+  | APPROACH | 표지판 앞 정지 거리 | 거리 ≤ 18cm 3회 연속 → 정지 (변경 시나리오 "약 18cm"). 10초 안에 도달 못 하면 `E_APPROACH` |
+  | NAVIGATE, UTURN | (장애물) | 변경 시나리오에서 장애물 없음 → `obstacle_enabled: false`. 켜면 거리 ≤ 15cm → PAUSED_OBSTACLE, 1초 연속 해제 시 재개 |
   | 기타 | 무시 | — |
-- **배치 제약**: 정지선에 멈췄을 때 차량 앞~표지판(또는 이미지판) 거리가 장애물 거리보다 짧으면, 정지선에 닿기 전에 표지판을 장애물로 보고 멈춘다 → **표지판·이미지판은 정지선에서 장애물 거리 + 10cm 이상(초기 25cm) 떨어뜨린다**
+- **배치 제약**: 정지선에 멈췄을 때 차량 앞~표지판 거리가 장애물 거리보다 짧으면, 정지선에 닿기 전에 표지판을 장애물로 보고 멈춘다 → **표지판은 정지선에서 장애물 거리 + 10cm 이상(초기 25cm), 유턴할 때 정지선이 보이지 않을 만큼 떨어뜨린다**. 표지판 판은 초음파가 반사될 만큼 평평하고 크게(약 10cm 이상)
 
 ### F9 · LED (`led_node`)
 | 명령 | 빨강 GPIO16 | 초록 GPIO26 |
 |---|---|---|
 | OFF (빈 차) | 끔 | 끔 |
-| RED (원 적재) | 켬 | 끔 |
-| GREEN (사각형 적재) | 끔 | 켬 |
+| RED (원 실음) | 켬 | 끔 |
+| GREEN (사각형 실음) | 끔 | 켬 |
 | ERROR | 0.5초 간격 둘 다 깜빡임 | 〃 |
+
+### F13 · 7세그먼트 (`segment_node`)
+- 1자리 7세그먼트를 GPIO 7개로 직접 구동 (a~g, 소수점 미사용) — 핀은 [pinmap.md](../hardware/pinmap.md), 세그먼트마다 330Ω
+- `/display/digit`(String 한 글자) → `0`~`9` 숫자, `-`(초기 설정 중), `E`(오류), 빈칸(끔)
+- 표시 = 실은 화물 개수: 상차 중 1초마다 1 증가, 하차 중 1초마다 1 감소 (`mission_node`가 보냄)
+- 공통 캐소드/애노드는 부품에 맞춰 파라미터 `common_anode`로 반전
 
 ### F10·F11 · 블루투스 (`bt_bridge_node`)
 - RFCOMM 서버, **채널 1 제어 / 채널 2 영상** 분리 → 영상이 밀려도 제어 명령은 지연되지 않음
@@ -334,12 +362,13 @@ FOLLOW_TO_EVENT ─► 이벤트?
 
 | 상황 | 감지 | 대응 | 복귀 |
 |------|------|------|------|
-| 장애물 | 주행 중 초음파 ≤ 15cm | PAUSED_OBSTACLE (정지) | 1초간 장애물 없음 → 자동 재개 |
+| 장애물 (기본 꺼짐) | `obstacle_enabled` 켰을 때 주행 중 초음파 ≤ 15cm | PAUSED_OBSTACLE (정지) | 1초간 장애물 없음 → 자동 재개 |
 | 블루투스 끊김 | 1.5초 무수신 | ESTOP (모터 정지) | 재연결 + RESUME |
 | 비상 정지 | BT `STOP` | ESTOP | RESUME |
-| 화물 인식 실패 | 재시도 2회 실패 | ERROR + BT 알림 | 화물 정리 후 RESUME |
-| 마커 판단 불가 | 목적지 색 갈래 ≠ 1개 | ERROR + BT 알림 | 마커 정리 후 RESUME |
-| 표지판 불일치 (옵션) | 기대 목적지와 다른 표지판 | ERROR + BT 알림 | 수동으로 차량 이동 후 RESUME |
+| 표지판 미인식·불일치 | 확정 실패 또는 기대 목적지와 다름 | ERROR(`E_SIGN`) + BT 알림 | 수동으로 차량 이동 후 RESUME |
+| 매핑 실패 (초기 설정) | 표지판 미인식, 같은 지점이 두 색에서 나옴 | ERROR(`E_MAP`) + BT 알림 | 스티커 확인 후 초기 설정 다시 |
+| 표지판 앞 도달 실패 | APPROACH 10초 초과 | ERROR(`E_APPROACH`) | RESUME |
+| 매핑 없이 작업 시작 | `START` 수신 시 매핑 4개 미만 | `NAK START 초기 설정 필요` | 초기 설정 |
 | 라인 이탈 (옵션) | LINE_END/라인 없음 1초 | 정지 → 좌우로 천천히 탐색(2초) → 실패 시 ERROR | RESUME |
 | 회전 실패 | 회전 시간 제한 초과 | ERROR | RESUME |
 
@@ -348,10 +377,10 @@ FOLLOW_TO_EVENT ─► 이벤트?
 ## 9. 운용 규칙
 | 항목 | 규칙 |
 |------|------|
-| 출발 위치 | 대기장소 정지선, **표지판을 바라보는 방향** (주차가 끝난 자세와 같음) → START 시 유턴부터 |
+| 출발 위치 | 대기장소 표지판 앞, **표지판을 바라보는 방향** (초기 설정·작업이 끝난 자세와 같음) → SETUP·START 시 유턴부터 |
 | 부팅 자동 실행 | Pi 부팅 시 `agv.launch.py`를 systemd 서비스로 자동 실행 (시연 때 모니터·키보드 없이 사용) — 3단계에서 설정 |
 | 배터리 | 작업 전 키트 전압계로 7.4V 배터리 전압 확인, 기준(예: 7.0V) 미만이면 충전 후 운용 — 기준값은 S0에서 결정 |
-| 이미지판 교체 | 차량이 하차 지점에 도착한 뒤 교체 (APPROACH 중 손이 들어가면 적재로 오판) |
+| 트랙 변경 | 지점·색 스티커 배치를 바꾸면 초기 설정을 다시 실행 |
 | 종료 | 노트북 앱 연결 해제 → 전원 스위치 OFF (Pi는 `shutdown` 후 끄는 것이 안전) |
 
 ## 10. 파라미터 (`agv_bringup/config/params.yaml` 예정)
@@ -361,8 +390,10 @@ FOLLOW_TO_EVENT ─► 이벤트?
 | drive | 주행 속도, PID 게인, 회전 속도, 회전 전 전진 거리 | — | S1, S2, S8 |
 | line | 이진화 방식, 관심 영역, 정지선 폭 비율 | Otsu, 하단 1/3, 2~5배 | S1, S3 |
 | marker | 4색 HSV 범위, 최소 면적, 다수결 프레임, 갈래 영역 경계(back 제외 영역 포함) | — , —, 10, — | S4, S5 |
-| layout | 정지선~표지판·이미지판 거리 | 25cm 이상 | S6, S7 |
+| layout | 정지선~표지판 거리, 표지판 앞 정지 거리, 유턴 공간 | 25cm 이상, 18cm, — | S6, S8 |
 | pantilt | LINE·JUNCTION·SIGN 각도, 서보 채널 | — | S0, S5, S6 |
-| ultrasonic | 적재 거리·유지 시간, 장애물 거리·해제 시간 | 10cm·3초, 15cm·1초 | S7, S9 |
-| classifier | 모델 경로, 신뢰도 기준, 재시도 | —, 0.8, 2 | S6, S7 |
+| ultrasonic | 표지판 앞 정지 거리·접근 시간 제한, (장애물 거리·해제 시간 — 기본 꺼짐) | 18cm·10초, 15cm·1초 | S6 |
+| classifier | 모델 경로, 신뢰도 기준, 재시도 | —, 0.8, 1 | S6 |
+| mission | 상차·하차 간격, 매핑 파일 | 1초, `~/.agv/track_map.json` | S7, S10 |
+| segment | 세그먼트 핀, 공통 단자 종류 | GPIO 4·27·12·13·9·10·11, — | S0 |
 | bt | 하트비트 시간, 영상 해상도·fps·품질 | 1.5초, 320×240·5·50 | S0 |

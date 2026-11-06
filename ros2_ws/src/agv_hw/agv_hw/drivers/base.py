@@ -36,3 +36,11 @@ class LedDriver(ABC):
 
     def close(self) -> None:
         self.set(False, False)
+
+
+class SegmentDriver(ABC):
+    @abstractmethod
+    def set(self, bits: tuple) -> None: ...                      # (a~g) 1 = 켬
+
+    def close(self) -> None:
+        self.set((0,) * 7)

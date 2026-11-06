@@ -6,13 +6,14 @@ package_name = "agv_bringup"
 
 setup(
     name=package_name,
-    version="0.1.0",
+    version="0.4.0",
     packages=[],
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
         ("share/" + package_name + "/config", glob("config/*.yaml")),
+        ("share/" + package_name + "/models", glob("models/*.tflite") + glob("models/*.txt")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,

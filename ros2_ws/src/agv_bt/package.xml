@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>agv_bt</name>
-  <version>0.1.0</version>
+  <version>0.4.0</version>
   <description>블루투스 RFCOMM 브리지 (노트북 앱 ↔ ROS 토픽)</description>
   <maintainer email="noreply@example.com">logistics-automation team</maintainer>
   <license>MIT</license>

@@ -16,9 +16,12 @@
 
 ## 2. 노트북 → Pi (채널 1)
 
+> 2026-11-02 사양 변경(초기 설정·모양별 개수)으로 `SETUP`·`START`·`STATUS`·`MAP`이 바뀜 (`agv_protocol` 반영). `SETUP`·`START`는 `agv.launch.py`(브리지 mission 연동)에서만 받고, s0·s1 시험 launch에서는 `NAK ... mission_node 없음`
+
 | 메시지 | 예시 | 의미 | 허용 상태 |
 |--------|------|------|-----------|
-| `START <n>` | `START 3` | 작업 횟수 n(1~9)으로 작업 시작 | IDLE |
+| `SETUP` | `SETUP` | 초기 설정(트랙 매핑) 시작 — 색마다 지점을 찾아가 표지판을 읽고 대응 저장 후 대기장소로 복귀 | IDLE |
+| `START <적> <녹>` | `START 12 5` | 물품별 운반 수량(각 0~99, 합 1 이상)으로 작업 시작. 1회 9개씩 여러 번 왕복, 먼저 운반할 물품은 무작위. 매핑 4개가 없으면 `NAK START 초기 설정 필요`. 인자 순서는 적(원, `CIRCLE`) 다음 녹(사각, `SQUARE`) | IDLE |
 | `STOP` | `STOP` | **비상 정지** — 즉시 모터 정지 (최우선 처리) | 모든 상태 |
 | `RESUME` | `RESUME` | 비상 정지·오류 후 재개 | ESTOP, ERROR |
 | `MANUAL ON` / `MANUAL OFF` | `MANUAL ON` | 수동 제어 모드 켜기/끄기 | IDLE, ESTOP, ERROR |
@@ -29,8 +32,9 @@
 
 | 메시지 | 예시 | 의미 |
 |--------|------|------|
-| `STATUS <state> <done>/<total> <cargo> <target>` | `STATUS NAVIGATE 1/3 CIRCLE DROP_A` | 현재 상태 (2Hz + 상태가 바뀔 때) |
-| `EVENT <type> <내용>` | `EVENT LOADED CIRCLE` | 주요 사건: `STARTED`, `LOADED`, `UNLOADED`, `PARKED`, `OBSTACLE`, `RESUMED` |
+| `STATUS <state> <mode> <done>/<total> <cargo> <load> <target>` | `STATUS NAVIGATE WORK 0/5 CIRCLE 3 DROP_A` | 현재 상태 (2Hz + 상태가 바뀔 때). mode = NONE·SETUP·WORK. 작업: done/total = 하차한 수/입력한 수, load = 실은 개수(7세그먼트). 초기 설정: done/total = 확인한 지점/4, target = 탐색 중인 색 |
+| `MAP <지점>=<색> ×4` | `MAP WORK=blue DROP_A=red DROP_B=green PARK=yellow` | 트랙 매핑 (모르면 `-`). 연결할 때, 바뀔 때 보냄 |
+| `EVENT <type> <내용>` | `EVENT LOADED CIRCLE 3` | 주요 사건: `SETUP_STARTED`, `MAPPED <지점> <색>`, `MAP_DONE`, `STARTED`, `LOADED <모양> <개수>`, `UNLOADED <모양> <개수>`, `PARKED`, `OBSTACLE`, `RESUMED` |
 | `ERROR <code> <내용>` | `ERROR E_MARKER red 갈래 0개` | 오류 발생 (아래 코드표) |
 | `ACK <명령>` / `NAK <명령> <이유>` | `NAK START 작업 중` | 명령 수신 결과 (`DEV`는 3-1절) |
 | `PONG` | `PONG` | PING 응답 |
@@ -38,9 +42,10 @@
 ### 오류 코드
 | 코드 | 의미 |
 |------|------|
-| `E_CARGO` | 화물 인식 실패 (재시도 초과) |
+| `E_MAP` | 초기 설정 실패 — 표지판 미인식, 같은 지점이 두 색에서 나옴 |
+| `E_APPROACH` | 정지선 뒤 표지판 앞까지 시간 안에 도달 못 함 |
 | `E_MARKER` | 분기점 목적지 마커 판단 불가 (예약 — 2026-11-02 스티커 방식은 `E_LINE`·표지판 확인으로 처리) |
-| `E_SIGN` | 표지판이 기대 목적지와 다름 |
+| `E_SIGN` | 표지판 미인식 또는 기대 목적지와 다름 |
 | `E_LINE` | 라인 이탈·재탐색 실패 |
 | `E_TURN` | 회전 시간 제한 초과 |
 | `E_LINK` | 블루투스 연결 끊김 (재연결 후 보고) |
@@ -102,8 +107,9 @@
 | 위치 | 영역 | 내용 |
 |------|------|------|
 | 상단 (공통) | 연결 | Pi 주소·연결/해제, 연결 상태, **비상 정지(항상 보임, 스페이스바)** |
-| **사용자 탭** | 작업 | 작업 횟수 입력 → 시작, 재개 |
-| | 상태 | 현재 상태, 완료/전체 작업 수, 적재 화물, 목적지, 최근 사건·오류 |
+| **사용자 탭** | 초기 설정 | 초기 설정 버튼, 트랙 매핑 표(지점 ↔ 색, 진행 중 갱신) |
+| | 작업 | 적·녹 수량 입력(각 0~99) → 작업 시작(매핑 완료 후), 재개. 매핑 결과는 앱 config.json에도 저장 |
+| | 상태 | 현재 상태, 하차/전체 개수, 실은 화물·개수, 목적지, 최근 사건·오류 |
 | | 영상 | 채널 2 영상 + 상태 문구 |
 | | 수동 제어 | 수동 모드 켜기/끄기, 방향 버튼 또는 W/A/S/D |
 | **개발자 탭** | 하드웨어 조작 | LED, 팬틸트 자세·각도, 바퀴 4개 개별 듀티 |

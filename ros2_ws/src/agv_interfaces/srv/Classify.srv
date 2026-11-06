@@ -1,0 +1,6 @@
+# mission_node → classifier_node — 표지판 앞에 멈춘 뒤 호출
+string  mode            # SIGN
+---
+string  label           # 확정 라벨 (sign_work 등), 미확정이면 빈 문자열
+float32 score           # 확정 라벨의 평균 신뢰도
+string  message         # 실패 이유 (모델 없음, 영상 없음, 기준 미달)

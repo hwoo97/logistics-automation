@@ -1,10 +1,11 @@
 # mission_node(또는 시험 명령) → drive_node (functional_design 사용자 정의 메시지)
-string command          # FOLLOW_TO_EVENT / STOP  (TURN_LEFT / TURN_RIGHT / STRAIGHT / UTURN / APPROACH는 다음 단계)
+string command          # FOLLOW_TO_EVENT / UTURN / APPROACH / STOP  (TURN_LEFT / TURN_RIGHT / STRAIGHT는 쓰지 않음 — 마커 회전은 FOLLOW 안에서)
+uint8  skip_stop_lines  # FOLLOW_TO_EVENT: 이만큼 정지선을 멈추지 않고 지나감 (유턴 뒤 1)
 ---
 bool   success
-string result           # 끝난 이유: STOP_LINE / CORNER_LEFT / CORNER_RIGHT / LINE_END / STOPPED / E_LINE / E_ESTOP / E_UNSUPPORTED_*
+string result           # 끝난 이유: STOP_LINE / CORNER_LEFT / CORNER_RIGHT / LINE_END / UTURN_DONE / STOPPED / E_LINE / E_TURN / E_ESTOP / E_UNSUPPORTED_*
 ---
 float32 linear          # 현재 /cmd_vel 선속도
 float32 angular         # 현재 /cmd_vel 회전
 float32 offset          # 현재 라인 오프셋
-string  phase           # FOLLOW / RECHECK 2/3 (라인 끝 후 정지해서 다시 보는 중) / VERIFY STOP_LINE (판정 후 정지해서 확인 중)
+string  phase           # FOLLOW / RECHECK 2/3 / VERIFY STOP_LINE / MARKER red / TURN LEFT / UTURN / APPROACH / PASS STOP_LINE
