@@ -28,7 +28,7 @@ class MissionConfig:
     approach_timeout_s: float = 10.0    # 정지선에서 표지판 앞까지 시간 제한 → E_APPROACH
     item_interval_s: float = 1.0        # 상차·하차 1개 간격
     obstacle_enabled: bool = False      # 변경 시나리오: 장애물 없음 — 켜면 주행 중 가까운 물체에서 멈춤
-    obstacle_distance: float = 0.15     # 주행 중 이보다 가까우면 장애물
+    obstacle_distance: float = 0.18     # 주행 중 이보다 가까우면 장애물 (drive_node 초음파 정지 뒤 재개 판단에도 씀)
     obstacle_clear_s: float = 1.0       # 장애물이 이만큼 연속 없으면 재개
     sign_retry: int = 1                 # 표지판 확정 실패 시 다시 보는 횟수
     parked_s: float = 2.0               # PARKED 표시 후 IDLE로
@@ -240,6 +240,11 @@ class MissionStateMachine:
                 return self._aim()
             if result == "LINE_END":
                 return self._error("E_LINE", "정지선 없이 라인 끝")
+            if result == "OBSTACLE":                        # drive_node 초음파 정지 → 물체가 치워지면 재개
+                c = self.ctx
+                c.resume_state, c.clear_since = State.NAVIGATE, None
+                self.state = State.PAUSED_OBSTACLE
+                return [A("REPORT", event="OBSTACLE", detail="초음파 정지")]
             return self._error("E_LINE" if not result.startswith("E_") else result, f"주행 중단 {result}")
         if self.state == State.APPROACH:
             return self._error("E_APPROACH", f"접근 중 주행 중단 {result}")

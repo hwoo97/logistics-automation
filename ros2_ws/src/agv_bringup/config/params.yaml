@@ -150,6 +150,10 @@ drive_node:
     # 유턴 후 맞추기 — 라인을 찾은 뒤 천천히 돌려 라인을 화면 기준 위치(앱 "라인 기준")에 맞추고 끝냄
     #   (빠르게 돌다 멈추면 관성·영상 지연으로 라인이 화면 끝에 남아 다음 출발에서 놓침)
     uturn_align: true           # false = 찾자마자 끝 (이전 방식)
+    # 초음파 정지 — 라인 주행 중 가까운 물체에서 멈춤 (결과 OBSTACLE). 제자리 회전·유턴·표지판 접근은 제외
+    obstacle_stop: true
+    obstacle_distance: 0.18     # m 이하가
+    obstacle_hits: 3            # 연속 이만큼이면 정지
     align_tol: 0.1              # 기준 위치에서 이만큼 안이면 맞음
     align_frames: 2             # 멈춘 채 이만큼 연속 맞으면 끝
     align_gain: 1.0             # 회전 = 오차 × gain (아래 범위로 자름)
@@ -172,7 +176,7 @@ mission_node:
     approach_timeout_s: 10.0    # 정지선 → 표지판 앞 시간 제한 (E_APPROACH)
     item_interval_s: 1.0        # 상차·하차 1개 간격
     obstacle_enabled: false     # 변경 시나리오: 장애물 없음 (켜면 주행 중 가까운 물체에서 멈춤)
-    obstacle_distance: 0.15     # 주행 중 장애물 거리
+    obstacle_distance: 0.18     # 주행 중 장애물 거리 — drive_node 초음파 정지 뒤 이보다 멀어지면(1초) 재개
     obstacle_clear_s: 1.0
     sign_retry: 1
     parked_s: 2.0

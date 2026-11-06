@@ -1018,3 +1018,89 @@ def test_other_color_center_is_ignored():
     d = marker_drive("red")
     d.step(AHEAD, DT, [MarkerInput("blue", "center", 200.0)])
     assert d.decision == "" and d.marker_ignore == 0
+
+
+# ── 초음파 정지 ─────────────────────────────────────────
+
+def ranges(d, values):
+    out = None
+    for v in values:
+        d.set_range(v)
+        out = d.step(AHEAD, DT)
+        if out.done:
+            break
+    return out
+
+
+def test_obstacle_stops_after_three_close_readings():
+    d = follow()
+    out = ranges(d, [0.17, 0.18])
+    assert not out.done and out.linear > 0
+    out = ranges(d, [0.1])
+    assert out.done and out.result == "OBSTACLE" and out.linear == 0 and out.angular == 0
+    assert not d.active
+
+
+def test_obstacle_needs_consecutive_readings():
+    d = follow()
+    out = ranges(d, [0.1, 0.1, 0.3, 0.1, 0.1, 0.5, 0.15, 0.15])
+    assert not out.done and d.active
+
+
+def test_obstacle_missing_reading_does_not_reset():
+    """값 없음(측정 실패)은 건너뜀 — mission_node 접근과 같은 규칙."""
+    d = follow()
+    out = ranges(d, [0.1, None, 0.1, None, 0.1])
+    assert out.done and out.result == "OBSTACLE"
+
+
+def test_obstacle_far_never_stops():
+    d = follow()
+    out = ranges(d, [0.19] * 20)
+    assert not out.done and out.linear > 0
+
+
+def test_obstacle_off():
+    d = DriveController(DriveConfig(obstacle_stop=False))
+    d.start(DriveCommand.FOLLOW_TO_EVENT)
+    assert not ranges(d, [0.05] * 10).done
+
+
+def test_obstacle_ignored_during_uturn():
+    """유턴은 표지판을 보고 선 자리에서 시작 — 가까워도 멈추지 않음."""
+    d = uturn()
+    for _ in range(10):
+        d.set_range(0.1)
+        assert not d.step(GONE, DT).done
+
+
+def test_obstacle_ignored_during_approach():
+    """APPROACH는 mission_node가 표지판 거리로 멈춤 — drive는 보지 않음."""
+    d = DriveController(DriveConfig())
+    d.start(DriveCommand.APPROACH)
+    for _ in range(10):
+        d.set_range(0.1)
+        assert not d.step(AHEAD, DT).done
+
+
+def test_obstacle_ignored_while_spinning_for_marker_turn():
+    """마커 회전의 제자리 회전 중에는 보지 않고, 회전 전 전진 중에는 봄."""
+    d = turning()
+    assert d.turn_stage in ("LEAVE", "BLIND")
+    for _ in range(5):
+        d.set_range(0.1)
+        assert not d.step(GONE, DT).done
+    f = marker_drive()
+    f.step(AHEAD, DT, see("left"))
+    check(f, "left")
+    assert f.turn_stage == "FORWARD"
+    out = ranges(f, [0.1, 0.1, 0.1])
+    assert out.done and out.result == "OBSTACLE"
+
+
+def test_obstacle_count_resets_on_new_start():
+    d = follow()
+    ranges(d, [0.1, 0.1])
+    d.cancel()
+    d.start(DriveCommand.FOLLOW_TO_EVENT)
+    assert not ranges(d, [0.1]).done

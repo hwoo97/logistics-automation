@@ -224,6 +224,30 @@ def test_obstacle_pauses_and_resumes_navigate():
     assert m.state == State.NAVIGATE and drive.data == {"command": "FOLLOW_TO_EVENT", "skip": 1}
 
 
+def test_drive_obstacle_result_pauses_and_resumes():
+    """drive_node 초음파 정지(OBSTACLE) — 오류가 아니라 장애물 대기, 0.18m보다 멀어진 채 1초면 주행 재개."""
+    m = MissionStateMachine(track_map=FULL)
+    m.state, m.ctx.skip_stop_lines = State.NAVIGATE, 1
+    acts = m.handle(Event("DRIVE_DONE", {"result": "OBSTACLE", "now": 0.0}))
+    assert m.state == State.PAUSED_OBSTACLE
+    assert [a.kind for a in acts] == ["REPORT"] and acts[0].data["event"] == "OBSTACLE"
+    m.handle(Event("RANGE", {"distance": 0.17, "now": 0.1}))
+    m.handle(Event("RANGE", {"distance": 0.3, "now": 0.2}))
+    assert m.state == State.PAUSED_OBSTACLE
+    acts = m.handle(Event("RANGE", {"distance": 0.3, "now": 1.3}))
+    drive = [a for a in acts if a.kind == "DRIVE"][0]
+    assert m.state == State.NAVIGATE and drive.data == {"command": "FOLLOW_TO_EVENT", "skip": 1}
+
+
+def test_drive_obstacle_then_estop_resume_continues_navigate():
+    m = MissionStateMachine(track_map=FULL)
+    m.state = State.NAVIGATE
+    m.handle(Event("DRIVE_DONE", {"result": "OBSTACLE"}))
+    m.handle(Event("STOP"))
+    acts = m.handle(Event("RESUME"))
+    assert m.state == State.NAVIGATE and any(a.data.get("command") == "FOLLOW_TO_EVENT" for a in acts)
+
+
 def test_passed_stop_line_is_not_skipped_again_after_obstacle():
     m = MissionStateMachine(track_map=FULL)
     m.state, m.ctx.skip_stop_lines = State.NAVIGATE, 1

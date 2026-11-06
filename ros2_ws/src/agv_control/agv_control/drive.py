@@ -79,6 +79,11 @@ class DriveConfig:
     align_max: float = 0.45         # 최대 회전 세기 — 빠르면 다시 지나침
     align_timeout_s: float = 3.0    # 이 시간 안에 못 맞추면 그대로 끝 (UTURN_DONE)
     approach_speed: float = 0.45    # 표지판 접근 속도 (TT 모터 시동 문턱 이상)
+    # 초음파 정지 (2026-11-06) — 라인 주행(FOLLOW_TO_EVENT) 중 가까운 물체에서 멈춤 → 결과 OBSTACLE.
+    # 제자리 회전(마커 회전·유턴)과 APPROACH(mission_node가 따로 멈춤)에서는 보지 않음
+    obstacle_stop: bool = True
+    obstacle_distance: float = 0.18 # 이 거리(m) 이하가
+    obstacle_hits: int = 3          # 이만큼 연속이면 정지 (값 없음은 건너뜀)
     pass_clear_frames: int = 8      # 정지선 통과: 판정이 이만큼 연속 사라지면 지나간 것으로 봄
 
 
@@ -175,6 +180,7 @@ class DriveController:
         self.turn_t = 0.0
         self.turn_frames = 0                # LEAVE: 라인이 안 보인 프레임 수, SEEK: 라인이 보인 프레임 수
         self.turn_offset = None             # LEAVE: 직전 라인 오프셋 (돌수록 기존 라인은 반대쪽으로 밀림)
+        self.range_hits = 0                 # 초음파가 obstacle_distance 이하로 연속 나온 수
         self.skip_stop = 0                  # 남은 통과할 정지선 수 (유턴 뒤 1 — 방금 지점의 정지선)
         self.passing = False                # 지금 정지선 위를 지나가는 중
         self.pass_clear = 0                 # 통과 중 정지선 판정이 연속으로 없던 프레임 수
@@ -241,8 +247,21 @@ class DriveController:
         self.last = DriveOutput(0.0, 0.0)
         self._clear_phases()
         self.cooldown = self.marker_ignore = self.event_ignore = 0.0
+        self.range_hits = 0
         if self.command == DriveCommand.UTURN:          # 왼쪽으로 제자리 회전 — 전진 없음 (정지선 너머로 가지 않게)
             self.turn_dir, self.turn_stage, self.turn_t, self.turn_frames, self.turn_offset = 1, "LEAVE", 0.0, 0, None
+
+    def _watch_range(self) -> bool:
+        """초음파 정지를 볼 때 — 라인 주행 중, 제자리 회전이 아닐 때 (회전 전 전진은 봄)."""
+        return (self.cfg.obstacle_stop and self.command == DriveCommand.FOLLOW_TO_EVENT
+                and not (self.turn_dir and self.turn_stage != "FORWARD"))
+
+    def set_range(self, distance: float | None) -> None:
+        """초음파 거리(m, 값 없음 = None). 볼 때가 아니면 연속 수를 지움."""
+        if not self._watch_range():
+            self.range_hits = 0
+        elif distance is not None:
+            self.range_hits = self.range_hits + 1 if distance <= self.cfg.obstacle_distance else 0
 
     def cancel(self) -> DriveOutput:
         self.command = None
@@ -258,6 +277,11 @@ class DriveController:
         if self.command not in (DriveCommand.FOLLOW_TO_EVENT, DriveCommand.UTURN, DriveCommand.APPROACH):
             name, self.command = self.command.value, None
             return DriveOutput(0.0, 0.0, True, f"E_UNSUPPORTED_{name}")
+        if self.range_hits >= self.cfg.obstacle_hits and self._watch_range():
+            self.command = None
+            self._clear_phases()
+            self.range_hits = 0
+            return DriveOutput(0.0, 0.0, True, "OBSTACLE")
 
         self.since_line = 0.0 if line is not None else self.since_line + dt
         if self.since_line > self.cfg.line_timeout_s:

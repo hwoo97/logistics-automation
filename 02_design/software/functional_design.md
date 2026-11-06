@@ -334,15 +334,17 @@ FOLLOW_TO_EVENT ─► 이벤트?
 - 모델 1개: `sign.tflite`(`sign_work` / `sign_drop_a` / `sign_drop_b` / `sign_park` / `background`). 화물 모양은 앱 입력값을 쓰므로 인식하지 않음 (2026-11-02)
 - 5프레임 연속 추론 → 신뢰도 0.8 이상이 3회 이상 같은 라벨이면 확정, 아니면 1회 재시도 후 실패(`E_SIGN`, 초기 설정 중이면 `E_MAP`) — 클래스 상세는 [tm_classes.md](../ai/tm_classes.md)
 
-### F8 · 초음파 (`ultrasonic_node`, 해석은 `mission_node`)
+### F8 · 초음파 (`ultrasonic_node`, 해석은 `mission_node`·`drive_node`)
 - 15Hz 측정(Trig 10µs 펄스 → Echo 펄스 폭), 이동 중앙값 필터 5개, 범위 밖(2cm 미만·200cm 초과)은 무시
 - 해석은 상태에 따라 다름
   | 상태 | 해석 | 기준 (파라미터, S7·S9에서 보정) |
   |---|---|---|
   | APPROACH | 표지판 앞 정지 거리 | 거리 ≤ 18cm 3회 연속 → 정지 (변경 시나리오 "약 18cm"). 10초 안에 도달 못 하면 `E_APPROACH` |
-  | NAVIGATE, UTURN | (장애물) | 변경 시나리오에서 장애물 없음 → `obstacle_enabled: false`. 켜면 거리 ≤ 15cm → PAUSED_OBSTACLE, 1초 연속 해제 시 재개 |
+  | 라인 주행 (drive `FOLLOW_TO_EVENT`) | 정지 (2026-11-06) | **drive_node**가 거리 ≤ 18cm 3회 연속(값 없음은 건너뜀)이면 정지·결과 `OBSTACLE` (`obstacle_stop`). 마커 회전의 제자리 회전 중은 제외(회전 전 전진은 봄). 개발자 탭 ▶ 출발에서도 동작. mission NAVIGATE에서는 PAUSED_OBSTACLE → 18cm보다 먼 상태 1초면 재개 |
+  | UTURN | 무시 | 표지판을 보고 선 자리에서 시작하므로 보지 않음 |
+  | (mission 장애물) | 기본 꺼짐 | `obstacle_enabled: true`면 NAVIGATE·UTURN에서 한 번이라도 ≤ 18cm → PAUSED_OBSTACLE (이전 방식) |
   | 기타 | 무시 | — |
-- **배치 제약**: 정지선에 멈췄을 때 차량 앞~표지판 거리가 장애물 거리보다 짧으면, 정지선에 닿기 전에 표지판을 장애물로 보고 멈춘다 → **표지판은 정지선에서 장애물 거리 + 10cm 이상(초기 25cm), 유턴할 때 정지선이 보이지 않을 만큼 떨어뜨린다**. 표지판 판은 초음파가 반사될 만큼 평평하고 크게(약 10cm 이상)
+- **배치 제약**: 정지선에 멈췄을 때 차량 앞~표지판 거리가 정지 거리(18cm)보다 짧으면, 정지선에 닿기 전에 표지판을 장애물로 보고 멈춘다 (2026-11-06부터 라인 주행 중 초음파 정지가 켜져 있음 — 표지판은 치워지지 않으므로 재개도 안 됨) → **표지판은 정지선에서 정지 거리 + 10cm 이상(약 28cm), 유턴할 때 정지선이 보이지 않을 만큼 떨어뜨린다**. 표지판 판은 초음파가 반사될 만큼 평평하고 크게(약 10cm 이상)
 
 ### F9 · LED (`led_node`)
 | 명령 | 빨강 GPIO16 | 초록 GPIO26 |
@@ -372,7 +374,7 @@ FOLLOW_TO_EVENT ─► 이벤트?
 
 | 상황 | 감지 | 대응 | 복귀 |
 |------|------|------|------|
-| 장애물 (기본 꺼짐) | `obstacle_enabled` 켰을 때 주행 중 초음파 ≤ 15cm | PAUSED_OBSTACLE (정지) | 1초간 장애물 없음 → 자동 재개 |
+| 장애물 | 라인 주행 중 초음파 ≤ 18cm 3회 연속 (drive_node `OBSTACLE`) | PAUSED_OBSTACLE (정지) | 1초간 18cm보다 멂 → 자동 재개 |
 | 블루투스 끊김 | 1.5초 무수신 | ESTOP (모터 정지) | 재연결 + RESUME |
 | 비상 정지 | BT `STOP` | ESTOP | RESUME |
 | 표지판 미인식·불일치 | 확정 실패 또는 기대 목적지와 다름 | ERROR(`E_SIGN`) + BT 알림 | 수동으로 차량 이동 후 RESUME |
@@ -402,7 +404,7 @@ FOLLOW_TO_EVENT ─► 이벤트?
 | marker | 4색 HSV 범위, 최소 면적, 다수결 프레임, 갈래 영역 경계(back 제외 영역 포함) | — , —, 10, — | S4, S5 |
 | layout | 정지선~표지판 거리, 표지판 앞 정지 거리, 유턴 공간 | 25cm 이상, 18cm, — | S6, S8 |
 | pantilt | LINE·JUNCTION·SIGN 각도, 서보 채널 | — | S0, S5, S6 |
-| ultrasonic | 표지판 앞 정지 거리·접근 시간 제한, (장애물 거리·해제 시간 — 기본 꺼짐) | 18cm·10초, 15cm·1초 | S6 |
+| ultrasonic | 표지판 앞 정지 거리·접근 시간 제한, (장애물 거리·해제 시간 — 기본 꺼짐) | 18cm·10초, 18cm·1초 | S6 |
 | classifier | 모델 경로, 신뢰도 기준, 재시도 | —, 0.8, 1 | S6 |
 | mission | 상차·하차 간격, 매핑 파일 | 1초, `~/.agv/track_map.json` | S7, S10 |
 | segment | 세그먼트 핀, 공통 단자 종류 | GPIO 4·27·12·13·9·10·11, — | S0 |

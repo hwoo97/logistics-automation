@@ -13,11 +13,12 @@ import time
 
 import rclpy
 from geometry_msgs.msg import Twist
+from sensor_msgs.msg import Range
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from std_msgs.msg import Bool, Float32, String
 
 from agv_control.drive import DriveConfig, DriveController, LineInput, MarkerInput, merge_stop_line
@@ -63,6 +64,7 @@ class DriveNode(Node):
         self.create_subscription(MarkerState, "/marker/state", self.on_marker,
                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT), callback_group=group)
         self.create_subscription(String, "/drive/target", self.on_target, QoSProfile(depth=10), callback_group=group)
+        self.create_subscription(Range, "/ultrasonic/range", self.on_range, qos_profile_sensor_data, callback_group=group)
         self.create_subscription(Bool, "/safety/estop", self.on_estop, QoSProfile(depth=10), callback_group=group)
         self.create_subscription(Float32, "/drive/speed", self.on_speed, QoSProfile(depth=10), callback_group=group)
         self.create_subscription(String, "/drive/tune", self.on_tune, QoSProfile(depth=10), callback_group=group)
@@ -91,6 +93,12 @@ class DriveNode(Node):
     def on_marker(self, msg: MarkerState):
         with self.lock:
             self.markers = [MarkerInput(c, s, float(y)) for c, s, y in zip(msg.colors, msg.sides, msg.y)]
+
+    def on_range(self, msg: Range):
+        """초음파 — 라인 주행 중 obstacle_distance 이하가 연속이면 정지 (결과 OBSTACLE)."""
+        r = msg.range
+        with self.lock:
+            self.ctrl.set_range(r if r == r and r != float("inf") else None)
 
     def on_target(self, msg: String):
         """목적지 색 — 지금은 노트북 앱 (DEV TARGET), 나중에 mission_node."""

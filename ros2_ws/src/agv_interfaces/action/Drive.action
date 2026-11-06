@@ -3,7 +3,7 @@ string command          # FOLLOW_TO_EVENT / UTURN / APPROACH / STOP  (TURN_LEFT 
 uint8  skip_stop_lines  # FOLLOW_TO_EVENT: 이만큼 정지선을 멈추지 않고 지나감 (유턴 뒤 1)
 ---
 bool   success
-string result           # 끝난 이유: STOP_LINE / CORNER_LEFT / CORNER_RIGHT / LINE_END / UTURN_DONE / STOPPED / E_LINE / E_TURN / E_ESTOP / E_UNSUPPORTED_*
+string result           # 끝난 이유: STOP_LINE / CORNER_LEFT / CORNER_RIGHT / LINE_END / UTURN_DONE / OBSTACLE(초음파 정지) / STOPPED / E_LINE / E_TURN / E_ESTOP / E_UNSUPPORTED_*
 ---
 float32 linear          # 현재 /cmd_vel 선속도
 float32 angular         # 현재 /cmd_vel 회전
