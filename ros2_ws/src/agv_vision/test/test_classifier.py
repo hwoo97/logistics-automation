@@ -2,7 +2,8 @@
 import numpy as np
 import pytest
 
-from agv_vision.classifier import BACKGROUND, TfliteClassifier, decide, load_labels, preprocess
+from agv_vision.classifier import (BACKGROUND, DEFAULT_LABEL_MAP, TfliteClassifier, decide, load_labels, map_label,
+                                   parse_label_map, preprocess)
 
 
 def test_decide_needs_three_confident_same_labels():
@@ -73,3 +74,32 @@ def test_predict_dequantizes_uint8_output(tmp_path):
     c = TfliteClassifier("x", str(f), interpreter=FakeInterpreter([230, 25], np.uint8, (1 / 255, 0)))
     label, score = c.predict(np.zeros((240, 320, 3), np.uint8))
     assert label == "sign_work" and score == pytest.approx(230 / 255)
+
+
+def test_label_map_default_matches_trained_model():
+    """2026-11-06 Teachable Machine 모델 labels.txt (HOME BOTTLE BOX LOAD none) → 표지판 라벨."""
+    m = parse_label_map(DEFAULT_LABEL_MAP)
+    assert [map_label(x, m) for x in ("LOAD", "BOTTLE", "BOX", "HOME", "none")] == \
+        ["sign_work", "sign_drop_a", "sign_drop_b", "sign_park", BACKGROUND]
+
+
+def test_label_map_ignores_case_and_keeps_unknown():
+    m = parse_label_map(["Home:sign_park", "bad", ":x", "y:"])
+    assert m == {"home": "sign_park"}
+    assert map_label("HOME", m) == "sign_park" and map_label("CAT", m) == "CAT"
+
+
+def test_mapped_none_is_background_not_confirmed():
+    m = parse_label_map(DEFAULT_LABEL_MAP)
+    results = [(map_label("none", m), 0.99)] * 5
+    assert decide(results) is None
+
+
+def test_repo_model_labels_all_mapped():
+    """저장소 models/labels.txt의 모든 클래스가 표지판 라벨이나 background로 바뀜."""
+    import os
+    from agv_protocol.types import Sign
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "agv_bringup", "models", "labels.txt")
+    m = parse_label_map(DEFAULT_LABEL_MAP)
+    mapped = {map_label(x, m) for x in load_labels(path)}
+    assert mapped == {s.value for s in Sign} | {BACKGROUND}

@@ -8,7 +8,9 @@
 
 | 모델 | 사용 상태 | 클래스 |
 |------|-----------|--------|
-| `sign.tflite` | CHECK_SIGN (표지판 앞 정지) — 초기 설정·작업 모두 | `sign_work`, `sign_drop_a`, `sign_drop_b`, `sign_park`, `background` |
+| `model_unquant.tflite` + `labels.txt` (2026-11-06 학습) | CHECK_SIGN (표지판 앞 정지) — 초기 설정·작업 모두 | 모델 클래스 `LOAD`·`BOTTLE`·`BOX`·`HOME`·`none` → `label_map`으로 `sign_work`·`sign_drop_a`(원)·`sign_drop_b`(사각)·`sign_park`·`background` |
+
+- 모델 클래스 이름은 표지판 라벨과 달라도 된다 — `params.yaml` `classifier_node.label_map`("모델이름:표지판")으로 바꿈. 처음 설계 이름(`sign.tflite`, `sign_*`)은 쓰지 않음
 
 - `background`: 표지판이 없거나 일부만 보일 때 → "확정하지 않음"으로 처리해 오판 방지
 - 모델 파일은 `ros2_ws/src/agv_bringup/models/`에, 학습 원본 이미지는 `04_unit/08_ai_vision/dataset/`(GitHub 제외)

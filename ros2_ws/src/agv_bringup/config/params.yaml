@@ -167,7 +167,11 @@ drive_node:
 
 classifier_node:
   ros__parameters:
-    # 모델 파일 = Teachable Machine에서 내보낸 sign.tflite + labels_sign.txt → agv_bringup/models/ (비우면 설치 폴더 기본 경로)
+    # 모델 = Teachable Machine에서 내보낸 파일을 agv_bringup/models/에 넣고 colcon build (이름만 적으면 설치 폴더 models/에서 찾음)
+    sign_model: model_unquant.tflite
+    sign_labels: labels.txt
+    # 모델 클래스 이름 → 표지판 (대소문자 무시). 표지판 = sign_work(상차)·sign_drop_a(원 하차)·sign_drop_b(사각 하차)·sign_park(대기장소)·background
+    label_map: ["LOAD:sign_work", "BOTTLE:sign_drop_a", "BOX:sign_drop_b", "HOME:sign_park", "none:background"]
     frames: 5                   # 요청마다 새 영상 이만큼 추론
     need: 3                     # 같은 라벨이 이만큼 이상이면 확정
     min_score: 0.8

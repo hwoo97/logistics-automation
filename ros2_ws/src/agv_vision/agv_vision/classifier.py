@@ -9,6 +9,24 @@ import cv2
 import numpy as np
 
 BACKGROUND = "background"
+# 모델 클래스 이름 → 표지판 라벨 (2026-11-06 학습 모델: labels.txt = HOME BOTTLE BOX LOAD none)
+# LOAD = 상차 지점, BOTTLE = 원(병) 하차 = DROP_A, BOX = 사각(상자) 하차 = DROP_B, HOME = 대기장소, none = 표지판 없음
+DEFAULT_LABEL_MAP = ("LOAD:sign_work", "BOTTLE:sign_drop_a", "BOX:sign_drop_b", "HOME:sign_park", "none:background")
+
+
+def parse_label_map(items) -> dict[str, str]:
+    """"모델이름:표지판라벨" 목록 → {모델이름(소문자): 표지판라벨}. 형식이 틀린 항목은 건너뜀."""
+    out = {}
+    for item in items or ():
+        name, sep, sign = str(item).partition(":")
+        if sep and name.strip() and sign.strip():
+            out[name.strip().lower()] = sign.strip()
+    return out
+
+
+def map_label(label: str, mapping: dict[str, str]) -> str:
+    """모델 클래스 이름을 표지판 라벨로 (대소문자 무시). 표에 없으면 그대로."""
+    return mapping.get(label.lower(), label)
 
 
 def load_labels(path: str) -> list[str]:

@@ -18,7 +18,7 @@ from sensor_msgs.msg import Image
 
 from agv_bt.video_streamer import to_bgr
 from agv_interfaces.srv import Classify
-from agv_vision.classifier import TfliteClassifier, decide
+from agv_vision.classifier import DEFAULT_LABEL_MAP, TfliteClassifier, decide, map_label, parse_label_map
 
 
 def _model_dir() -> str:
@@ -34,8 +34,10 @@ class ClassifierNode(Node):
         super().__init__("classifier_node")
         p = self.declare_parameter
         models = _model_dir()
-        model = p("sign_model", os.path.join(models, "sign.tflite")).value
-        labels = p("sign_labels", os.path.join(models, "labels_sign.txt")).value
+        # 파일 이름만 주면 설치 폴더 models/ 안에서 찾음 (Teachable Machine 기본 이름 model_unquant.tflite·labels.txt)
+        model = os.path.join(models, p("sign_model", "model_unquant.tflite").value)
+        labels = os.path.join(models, p("sign_labels", "labels.txt").value)
+        self.label_map = parse_label_map(p("label_map", list(DEFAULT_LABEL_MAP)).value)
         self.frames = p("frames", 5).value                  # 추론할 새 영상 수
         self.need = p("need", 3).value                      # 같은 라벨이 이만큼
         self.min_score = p("min_score", 0.8).value
@@ -44,7 +46,8 @@ class ClassifierNode(Node):
         self.error = ""
         try:
             self.classifier = TfliteClassifier(model, labels)
-            self.get_logger().info(f"표지판 모델 {model} — 라벨 {self.classifier.labels}")
+            names = [f"{lb}→{map_label(lb, self.label_map)}" for lb in self.classifier.labels]
+            self.get_logger().info(f"표지판 모델 {model} — 라벨 {names}")
         except Exception as e:                              # noqa: BLE001 — 모델 없음·런타임 없음 모두 노드는 살림
             self.error = f"모델 없음: {e}"
             self.get_logger().error(f"{self.error} — Teachable Machine 모델을 {models}에 넣고 다시 빌드")
@@ -83,8 +86,9 @@ class ClassifierNode(Node):
                 if msg is None:
                     break
                 try:
-                    results.append(self.classifier.predict(to_bgr(msg.encoding, msg.height, msg.width, msg.step,
-                                                                  msg.data)))
+                    label, score = self.classifier.predict(to_bgr(msg.encoding, msg.height, msg.width, msg.step,
+                                                                  msg.data))
+                    results.append((map_label(label, self.label_map), score))
                 except ValueError as e:
                     res.message = f"영상 변환 실패: {e}"
                     return res
@@ -97,7 +101,7 @@ class ClassifierNode(Node):
             res.label, res.score = found[0], found[1]
         else:
             res.message = f"확정 못 함 ({len(results)}장: {', '.join(f'{lb} {s:.2f}' for lb, s in results)})"
-        self.get_logger().info(f"표지판 {res.label or '-'} {res.message}")
+        self.get_logger().info(f"표지판 {res.label or '-'} {res.score:.2f} {res.message}")
         return res
 
 
