@@ -78,7 +78,9 @@ class DriveConfig:
     align_min: float = 0.3          # 최소 회전 세기 — 이보다 약하면 모터가 안 돎
     align_max: float = 0.45         # 최대 회전 세기 — 빠르면 다시 지나침
     align_timeout_s: float = 3.0    # 이 시간 안에 못 맞추면 그대로 끝 (UTURN_DONE)
-    approach_speed: float = 0.45    # 표지판 접근 속도 (TT 모터 시동 문턱 이상)
+    approach_speed: float = 0.35    # 표지판 접근 속도 (앱 "접근 속도", DEV TUNE APPROACH) — 2026-11-06 실차 0.45가 빠름
+    approach_kick_s: float = 0.3    # 출발할 때 이 시간은 시동 세기로 — TT 모터는 멈춘 상태에서 낮은 값으로는 안 움직임
+    approach_kick_speed: float = 0.45   # 시동 세기 (접근 속도가 이보다 높으면 접근 속도 그대로)
     # 초음파 정지 (2026-11-06) — 라인 주행(FOLLOW_TO_EVENT) 중 가까운 물체에서 멈춤 → 결과 OBSTACLE.
     # 제자리 회전(마커 회전·유턴)과 APPROACH(mission_node가 따로 멈춤)에서는 보지 않음
     obstacle_stop: bool = True
@@ -181,6 +183,7 @@ class DriveController:
         self.turn_frames = 0                # LEAVE: 라인이 안 보인 프레임 수, SEEK: 라인이 보인 프레임 수
         self.turn_offset = None             # LEAVE: 직전 라인 오프셋 (돌수록 기존 라인은 반대쪽으로 밀림)
         self.range_hits = 0                 # 초음파가 obstacle_distance 이하로 연속 나온 수
+        self.approach_t = 0.0               # APPROACH 시작 후 시간 (시동 구간)
         self.skip_stop = 0                  # 남은 통과할 정지선 수 (유턴 뒤 1 — 방금 지점의 정지선)
         self.passing = False                # 지금 정지선 위를 지나가는 중
         self.pass_clear = 0                 # 통과 중 정지선 판정이 연속으로 없던 프레임 수
@@ -215,7 +218,7 @@ class DriveController:
 
     def set_tune(self, key: str, value: float) -> None:
         """노트북 앱 조정 (DEV TUNE) — TURN: 회전 세기, CENTER: 라인 기준 위치, FORWARD: 회전 전 전진 시간,
-        SPIN: 제자리 회전 세기, BLIND: 마커 회전 중 라인 무시 시간. 주행 중에도 바로 적용."""
+        SPIN: 제자리 회전 세기, BLIND: 마커 회전 중 라인 무시 시간, APPROACH: 표지판 접근 속도. 주행 중에도 바로 적용."""
         if key == "TURN":
             self.cfg.turn_scale = value
         elif key == "CENTER":
@@ -226,6 +229,8 @@ class DriveController:
             self.cfg.turn_speed = value
         elif key == "BLIND":
             self.cfg.turn_blind_s = value
+        elif key == "APPROACH":
+            self.cfg.approach_speed = value
         else:
             raise ValueError(f"모르는 조정 항목: {key}")
 
@@ -248,6 +253,7 @@ class DriveController:
         self._clear_phases()
         self.cooldown = self.marker_ignore = self.event_ignore = 0.0
         self.range_hits = 0
+        self.approach_t = 0.0
         if self.command == DriveCommand.UTURN:          # 왼쪽으로 제자리 회전 — 전진 없음 (정지선 너머로 가지 않게)
             self.turn_dir, self.turn_stage, self.turn_t, self.turn_frames, self.turn_offset = 1, "LEAVE", 0.0, 0, None
 
@@ -353,8 +359,11 @@ class DriveController:
 
     def _step_approach(self, line: LineInput | None, dt: float) -> DriveOutput:
         """표지판까지 직진 서행 — 카메라가 표지판 쪽을 보고 있으므로(교수 변경 시나리오 순서) 라인·이벤트·마커를 모두 무시.
-        라인 상태는 영상이 오고 있는지(line_timeout)만 확인하는 데 씀."""
-        self.last = DriveOutput(round(self.cfg.approach_speed, 3), 0.0)
+        라인 상태는 영상이 오고 있는지(line_timeout)만 확인하는 데 씀. 처음 approach_kick_s는 시동 세기로 출발."""
+        c = self.cfg
+        speed = c.approach_speed if self.approach_t >= c.approach_kick_s else max(c.approach_speed, c.approach_kick_speed)
+        self.approach_t += dt
+        self.last = DriveOutput(round(speed, 3), 0.0)
         return self.last
 
     def _step_recheck(self, line: LineInput | None, dt: float) -> DriveOutput:

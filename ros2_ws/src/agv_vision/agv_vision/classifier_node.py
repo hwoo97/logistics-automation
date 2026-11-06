@@ -2,6 +2,8 @@
 
 모델은 Teachable Machine에서 내보낸 sign.tflite + labels_sign.txt (agv_bringup/models/). 파일이 없으면 노드는 뜨고
 요청마다 "모델 없음"으로 실패를 돌려준다 (mission_node가 E_SIGN 처리). 영상은 요청이 왔을 때만 추론한다.
+카메라 영상도 요청 중에만 구독한다 (2026-11-06) — 늘 받으면 주행 중 Pi 부하가 늘어 line_node 처리 프레임이 줄고
+정지선 확정(3프레임)이 늦어져 정지선을 지나쳤음 (agv.launch.py 도착 시험).
 """
 import os
 import threading
@@ -48,10 +50,9 @@ class ClassifierNode(Node):
             self.get_logger().error(f"{self.error} — Teachable Machine 모델을 {models}에 넣고 다시 빌드")
         self.cond = threading.Condition()
         self.latest, self.seq = None, 0                     # 마지막 영상 (변환 전)과 번호
-        group = ReentrantCallbackGroup()
-        self.create_subscription(Image, p("camera_topic", "/camera/image_raw").value, self.on_image,
-                                 qos_profile_sensor_data, callback_group=group)
-        self.create_service(Classify, "/vision/classify", self.on_classify, callback_group=group)
+        self.camera_topic = p("camera_topic", "/camera/image_raw").value
+        self.group = ReentrantCallbackGroup()
+        self.create_service(Classify, "/vision/classify", self.on_classify, callback_group=self.group)
 
     def on_image(self, msg: Image):
         with self.cond:
@@ -74,15 +75,23 @@ class ClassifierNode(Node):
             return res
         deadline = time.monotonic() + self.timeout_s
         seq, results = self.seq, []
-        while len(results) < self.frames:
-            msg, seq = self._next_frame(seq, deadline)
-            if msg is None:
-                break
-            try:
-                results.append(self.classifier.predict(to_bgr(msg.encoding, msg.height, msg.width, msg.step, msg.data)))
-            except ValueError as e:
-                res.message = f"영상 변환 실패: {e}"
-                return res
+        sub = self.create_subscription(Image, self.camera_topic, self.on_image, qos_profile_sensor_data,
+                                       callback_group=self.group)   # 요청 중에만 영상 받음
+        try:
+            while len(results) < self.frames:
+                msg, seq = self._next_frame(seq, deadline)
+                if msg is None:
+                    break
+                try:
+                    results.append(self.classifier.predict(to_bgr(msg.encoding, msg.height, msg.width, msg.step,
+                                                                  msg.data)))
+                except ValueError as e:
+                    res.message = f"영상 변환 실패: {e}"
+                    return res
+        finally:
+            self.destroy_subscription(sub)
+            with self.cond:
+                self.latest = None
         found = decide(results, self.min_score, self.need)
         if found:
             res.label, res.score = found[0], found[1]

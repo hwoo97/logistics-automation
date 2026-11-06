@@ -958,9 +958,50 @@ def test_approach_slow_and_ignores_events():
     d = DriveController()
     d.set_target("red")
     d.start(DriveCommand.APPROACH)
+    for _ in range(int(c.approach_kick_s / DT) + 1):
+        d.step(AHEAD, DT)
     for line in (STOP, LineInput(0.0, True, LineEvent.LINE_END, LineEvent.LINE_END), BAR):
         out = d.step(line, DT, see("left", y=200.0))
         assert not out.done and out.linear == pytest.approx(c.approach_speed) and d.phase == "APPROACH"
+
+
+def test_approach_kicks_then_slows():
+    """멈춘 TT 모터가 움직이도록 처음 0.3초는 시동 세기(0.45), 그 뒤 접근 속도(0.35)."""
+    c = DriveConfig()
+    assert c.approach_speed < c.approach_kick_speed
+    d = DriveController()
+    d.start(DriveCommand.APPROACH)
+    assert d.step(AHEAD, DT).linear == pytest.approx(c.approach_kick_speed)
+    for _ in range(int(c.approach_kick_s / DT)):
+        d.step(AHEAD, DT)
+    assert d.step(AHEAD, DT).linear == pytest.approx(c.approach_speed)
+
+
+def test_approach_kick_again_on_restart():
+    c = DriveConfig()
+    d = DriveController()
+    d.start(DriveCommand.APPROACH)
+    for _ in range(20):
+        d.step(AHEAD, DT)
+    d.cancel()
+    d.start(DriveCommand.APPROACH)
+    assert d.step(AHEAD, DT).linear == pytest.approx(c.approach_kick_speed)
+
+
+def test_approach_speed_tune_from_app():
+    d = DriveController()
+    d.set_tune("APPROACH", 0.3)
+    d.start(DriveCommand.APPROACH)
+    for _ in range(20):
+        out = d.step(AHEAD, DT)
+    assert out.linear == pytest.approx(0.3)
+
+
+def test_approach_faster_than_kick_uses_approach_speed():
+    d = DriveController()
+    d.set_tune("APPROACH", 0.6)
+    d.start(DriveCommand.APPROACH)
+    assert d.step(AHEAD, DT).linear == pytest.approx(0.6)
 
 
 def test_approach_goes_straight_ignoring_line():
@@ -968,7 +1009,7 @@ def test_approach_goes_straight_ignoring_line():
     d = DriveController()
     d.start(DriveCommand.APPROACH)
     out = d.step(LineInput(0.4, True, angle=60.0, angle_valid=True), DT)
-    assert out.angular == 0 and out.linear == pytest.approx(DriveConfig().approach_speed)
+    assert out.angular == 0 and out.linear == pytest.approx(DriveConfig().approach_kick_speed)
     out = d.step(LineInput(0.4, False), DT)
     assert out.angular == 0 and out.linear > 0
 

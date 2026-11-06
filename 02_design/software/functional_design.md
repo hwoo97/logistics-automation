@@ -92,7 +92,7 @@
 | `/safety/estop` | std_msgs/Bool | bt_bridge·mission → motor_node | 이벤트 | 비상 정지 래치 |
 | `/dev/wheels` | std_msgs/Float32MultiArray | bt_bridge → motor_node | 0.3초 반복 | 개발자 탭: L1~L4 듀티 (-1~1), 워치독 적용 |
 | `/drive/speed` | std_msgs/Float32 | bt_bridge → drive_node | 이벤트 | 개발자 탭 "주행 속도": 라인 주행 기본 선속도 (0.2~1.0), 주행 중에도 적용 |
-| `/drive/tune` | std_msgs/String | bt_bridge → drive_node | 이벤트 | 개발자 탭 "회전 세기"(`TURN 0.6`)·"라인 기준"(`CENTER -0.1`)·"회전 전 전진"(`FORWARD 0.6`)·"제자리 회전"(`SPIN 0.6`)·"회전 중 라인 무시"(`BLIND 2.0`), 주행 중에도 적용 |
+| `/drive/tune` | std_msgs/String | bt_bridge → drive_node | 이벤트 | 개발자 탭 "회전 세기"(`TURN 0.6`)·"라인 기준"(`CENTER -0.1`)·"회전 전 전진"(`FORWARD 0.6`)·"제자리 회전"(`SPIN 0.6`)·"회전 중 라인 무시"(`BLIND 2.0`)·"접근 속도"(`APPROACH 0.35`), 주행 중에도 적용 |
 | `/drive/target` | std_msgs/String | bt_bridge(시험)·mission_node(예정) → drive_node | 이벤트 | 목적지 색 `red`/`green`/`blue`/`yellow`, `NONE`이면 마커를 보지 않음 |
 | `/line/tune` | std_msgs/String | bt_bridge → line_node | 이벤트 | 개발자 탭 "확인 프레임"(`CONFIRM 3`)·"라인 끝 프레임"(`LINE_END 10`), 실행 중 적용 |
 | `/dev/pantilt_angle` | std_msgs/Float32MultiArray | bt_bridge → pantilt_node | 이벤트 | 개발자 탭: [팬, 틸트] 각도 |
@@ -333,6 +333,7 @@ FOLLOW_TO_EVENT ─► 이벤트?
 - Teachable Machine 이미지 모델 → TFLite 변환 → LiteRT(`ai-edge-litert`)로 추론, 입력 224×224
 - 모델 1개: `sign.tflite`(`sign_work` / `sign_drop_a` / `sign_drop_b` / `sign_park` / `background`). 화물 모양은 앱 입력값을 쓰므로 인식하지 않음 (2026-11-02)
 - 5프레임 연속 추론 → 신뢰도 0.8 이상이 3회 이상 같은 라벨이면 확정, 아니면 1회 재시도 후 실패(`E_SIGN`, 초기 설정 중이면 `E_MAP`) — 클래스 상세는 [tm_classes.md](../ai/tm_classes.md)
+- 카메라 영상은 분류 요청(`/vision/classify`) 중에만 구독 (2026-11-06) — 늘 받으면 주행 중 Pi 부하로 line_node 처리 프레임이 줄어 정지선을 지나쳤음
 
 ### F8 · 초음파 (`ultrasonic_node`, 해석은 `mission_node`·`drive_node`)
 - 15Hz 측정(Trig 10µs 펄스 → Echo 펄스 폭), 이동 중앙값 필터 5개, 범위 밖(2cm 미만·200cm 초과)은 무시

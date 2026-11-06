@@ -150,6 +150,10 @@ drive_node:
     # 유턴 후 맞추기 — 라인을 찾은 뒤 천천히 돌려 라인을 화면 기준 위치(앱 "라인 기준")에 맞추고 끝냄
     #   (빠르게 돌다 멈추면 관성·영상 지연으로 라인이 화면 끝에 남아 다음 출발에서 놓침)
     uturn_align: true           # false = 찾자마자 끝 (이전 방식)
+    # 표지판 접근 (정지선 → 카메라 올림 → 직진 서행, mission_node가 초음파로 멈춤)
+    approach_speed: 0.35        # 접근 속도 (앱 "접근 속도") — 안 움직이면 올림
+    approach_kick_s: 0.3        # 출발 시동 시간 — 이 동안은 아래 세기로 (멈춘 TT 모터가 낮은 값으로는 안 돎)
+    approach_kick_speed: 0.45
     # 초음파 정지 — 라인 주행 중 가까운 물체에서 멈춤 (결과 OBSTACLE). 제자리 회전·유턴·표지판 접근은 제외
     obstacle_stop: true
     obstacle_distance: 0.18     # m 이하가
