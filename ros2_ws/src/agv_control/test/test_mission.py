@@ -27,6 +27,7 @@ class World:
         self.sm, self.track, self.sign_fail = sm, track, sign_fail
         self.at, self.color, self.now = "PARK", "NONE", 0.0
         self.log, self.digits, self.leds, self.reports, self.saved = [], [], [], [], None
+        self.signs = []
         self.queue: list[Event] = []
 
     def send(self, kind, **data):
@@ -57,6 +58,8 @@ class World:
             self.leds.append(d["state"])
         elif k == "REPORT":
             self.reports.append(d.get("event") or d.get("error"))
+            if d.get("event") == "SIGN":
+                self.signs.append(d.get("detail", ""))
         elif k == "SAVE_MAP":
             self.saved = dict(d["track_map"])
         elif k == "POSE":
@@ -140,7 +143,7 @@ def work(circle, square, **cfg):
 def test_work_circle_then_square_and_back():
     w = work(3, 2)
     assert w.sm.state == State.PARKED and w.at == "PARK"
-    assert w.reports == ["STARTED", "LOADED", "UNLOADED", "LOADED", "UNLOADED", "PARKED"]
+    assert [r for r in w.reports if r != "SIGN"] == ["STARTED", "LOADED", "UNLOADED", "LOADED", "UNLOADED", "PARKED"]
     assert w.digits == ["0", "1", "2", "3", "2", "1", "0", "1", "2", "1", "0", "0"]
     assert w.leds[1:] == ["RED", "OFF", "GREEN", "OFF", "OFF"] and w.sm.ctx.done == 5
     colors = [d["color"] for k, d in w.log if k == "TARGET"]
@@ -414,8 +417,8 @@ def test_arrive_test_reports_sign_and_lowers_camera():
     m = arrive_test()
     acts = m.handle(Event("SIGN", {"label": "sign_work"}))
     assert m.state == State.IDLE and ("POSE", "LINE") in kinds(acts)
-    report = [a for a in acts if a.kind == "REPORT"][0].data
-    assert report == {"event": "ARRIVED", "detail": "sign_work"}
+    reports = [a.data for a in acts if a.kind == "REPORT"]
+    assert reports == [{"event": "SIGN", "detail": "sign_work 0.00"}, {"event": "ARRIVED", "detail": "sign_work"}]
 
 
 def test_arrive_test_without_model_is_not_error():
@@ -423,7 +426,8 @@ def test_arrive_test_without_model_is_not_error():
     m.handle(Event("SIGN", {"label": "", "message": "모델 없음"}))                # 다시 한 번 봄
     acts = m.handle(Event("SIGN", {"label": "", "message": "모델 없음"}))
     assert m.state == State.IDLE
-    assert [a.data for a in acts if a.kind == "REPORT"] == [{"event": "ARRIVED", "detail": "표지판 못 읽음 모델 없음"}]
+    assert [a.data for a in acts if a.kind == "REPORT"] == [{"event": "SIGN", "detail": "- 모델 없음"},
+                                                            {"event": "ARRIVED", "detail": "표지판 못 읽음 모델 없음"}]
 
 
 def test_arrive_test_only_from_idle():
@@ -438,3 +442,32 @@ def test_cancel_stops_and_goes_idle():
     acts = m.handle(Event("CANCEL"))
     assert m.state == State.IDLE and acts[0].kind == "CANCEL_DRIVE" and not m.ctx.test
     assert m.handle(Event("CANCEL")) == []                                       # IDLE이면 아무것도 안 함
+
+
+def test_sign_result_reported_with_score():
+    """표지판 분류 결과는 매번 EVENT SIGN <라벨> <점수> — 개발자 탭 "표지판 인식" 칸."""
+    m = MissionStateMachine(track_map=FULL)
+    m.state = State.CHECK_SIGN
+    m.ctx.test = True
+    acts = m.handle(Event("SIGN", {"label": "sign_drop_a", "score": 0.934}))
+    assert acts[0].kind == "REPORT" and acts[0].data == {"event": "SIGN", "detail": "sign_drop_a 0.93"}
+
+
+def test_sign_failure_reported_with_reason():
+    m = MissionStateMachine(track_map=FULL)
+    m.state = State.CHECK_SIGN
+    m.ctx.test = True
+    acts = m.handle(Event("SIGN", {"label": "", "message": "확정 못 함 (5장: none 0.99)"}))
+    assert acts[0].data == {"event": "SIGN", "detail": "- 확정 못 함 (5장: none 0.99)"}
+    assert [a.kind for a in acts[1:]] == ["CLASSIFY"]                # 재시도는 그대로
+
+
+def test_sign_reported_in_work_too():
+    w = work(1, 1)
+    assert w.signs and all(s.split()[0].startswith("sign_") for s in w.signs)
+
+
+def test_sign_ignored_outside_check_sign():
+    m = MissionStateMachine(track_map=FULL)
+    m.state = State.NAVIGATE
+    assert m.handle(Event("SIGN", {"label": "sign_work", "score": 0.9})) == []

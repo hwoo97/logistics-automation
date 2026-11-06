@@ -180,7 +180,8 @@ class MissionNode(Node):
             self.feed_later("SIGN", label="", message="classifier_node 없음")
             return
         future = self.classify.call_async(Classify.Request(mode=mode))
-        future.add_done_callback(lambda f: self.feed_later("SIGN", label=f.result().label, message=f.result().message))
+        future.add_done_callback(lambda f: self.feed_later("SIGN", label=f.result().label, score=float(f.result().score),
+                                                           message=f.result().message))
 
     def feed_later(self, kind: str, **data):
         """콜백 안(잠금 중)에서 부를 수 있게 따로 스레드로 넘긴다."""

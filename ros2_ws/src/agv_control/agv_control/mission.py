@@ -284,8 +284,14 @@ class MissionStateMachine:
         return []
 
     def _on_sign(self, d: dict) -> list[Action]:
+        """표지판 분류 결과 — 매번 EVENT SIGN <라벨> <점수> (못 읽으면 SIGN - <이유>)를 앱에 알린 뒤 처리."""
         if self.state != State.CHECK_SIGN:
             return []
+        label = d.get("label", "")
+        detail = f"{label} {float(d.get('score', 0.0)):.2f}" if label else f"- {d.get('message', '')}".rstrip()
+        return [A("REPORT", event="SIGN", detail=detail)] + self._sign_result(d)
+
+    def _sign_result(self, d: dict) -> list[Action]:
         c = self.ctx
         label = d.get("label", "")
         if c.test:

@@ -124,7 +124,7 @@ class FakeVehicle:
             self.pan, self.tilt = POSES[d["pose"]]
             self.later(now, 0.3, "POSE_READY", pose=d["pose"])
         elif k == "CLASSIFY":
-            self.later(now, 1.0, "SIGN", label=SIGN_LABEL[self.at])
+            self.later(now, 1.0, "SIGN", label=SIGN_LABEL[self.at], score=0.95)
         elif k == "LED":
             self.led = d["state"]
         elif k == "DIGIT":

@@ -302,6 +302,8 @@ class MainWindow:
         elif t == "EVENT":
             self.user.add_event(f"{r['event']} {r['detail']}".strip())
             self.dev.show_arrive_event(r["event"], r["detail"])
+            if r["event"] == "SIGN":
+                self.dev.show_sign(r["detail"])
         elif t == "ERROR":
             self.user.add_event(f"오류 {r['code']} {r['detail']}".strip(), error=True)
             self.dev.show_arrive_event("ERROR", f"{r['code']} {r['detail']}".strip())

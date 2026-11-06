@@ -178,7 +178,30 @@ class DevTab(ttk.Frame):
         self.nodes.grid(row=1, column=1, padx=4, pady=2)
         self.state_lbl = ttk.Label(sy, text="차량 상태: -")
         self.state_lbl.grid(row=2, column=0, columnspan=2, sticky="w", padx=4)
+
+        sg = ttk.LabelFrame(f, text="표지판 인식  (EVENT SIGN)")
+        sg.pack(fill="x", pady=(4, 0))
+        self.sign_lbl = ttk.Label(sg, text="-", font=("맑은 고딕", 12, "bold"))
+        self.sign_lbl.pack(anchor="w", padx=4)
+        self.sign_detail = ttk.Label(sg, text="표지판 앞에서 분류하면 결과가 여기에 나옴", foreground="gray",
+                                     wraplength=300, justify="left")
+        self.sign_detail.pack(anchor="w", padx=4, pady=(0, 2))
         return f
+
+    SIGN_NAMES = {"sign_work": "상차 지점", "sign_drop_a": "원 하차 지점", "sign_drop_b": "사각 하차 지점",
+                  "sign_park": "대기장소"}
+
+    def show_sign(self, detail: str):
+        """EVENT SIGN <라벨> <점수> 또는 SIGN - <이유> → 표지판 인식 칸."""
+        parts = detail.split(maxsplit=1)
+        now = time.strftime("%H:%M:%S")
+        if not parts or parts[0] == "-":
+            self.sign_lbl.config(text="못 읽음", foreground="#d32f2f")
+            self.sign_detail.config(text=f"{now}  {parts[1] if len(parts) > 1 else ''}", foreground="gray")
+            return
+        label, score = parts[0], (parts[1] if len(parts) > 1 else "")
+        self.sign_lbl.config(text=f"{self.SIGN_NAMES.get(label, label)}  {score}", foreground="#2e7d32")
+        self.sign_detail.config(text=f"{now}  {label}", foreground="gray")
 
     def _draw_graph(self):
         c, w, h, top = self.graph, 300, 110, 2.0
@@ -262,7 +285,7 @@ class DevTab(ttk.Frame):
                 ("접근 속도", self.approach, TUNE_RANGES["APPROACH"], 0.05,
                  lambda: self._send_tune("APPROACH", self.approach)))
         for r, (name, var, (lo, hi), step, send) in enumerate(rows, start=1):
-            ttk.Label(f, text=name, width=11).grid(row=r, column=0, sticky="w", padx=(4, 0))
+            ttk.Label(f, text=name, width=14).grid(row=r, column=0, sticky="w", padx=(4, 0))
             s = tk.Scale(f, from_=lo, to=hi, resolution=step, orient="horizontal", variable=var, length=150,
                          showvalue=True)
             s.grid(row=r, column=1, sticky="w")

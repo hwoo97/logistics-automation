@@ -34,7 +34,7 @@
 |--------|------|------|
 | `STATUS <state> <mode> <done>/<total> <cargo> <load> <target>` | `STATUS NAVIGATE WORK 0/5 CIRCLE 3 DROP_A` | 현재 상태 (2Hz + 상태가 바뀔 때). mode = NONE·SETUP·WORK. 작업: done/total = 하차한 수/입력한 수, load = 실은 개수(7세그먼트). 초기 설정: done/total = 확인한 지점/4, target = 탐색 중인 색 |
 | `MAP <지점>=<색> ×4` | `MAP WORK=blue DROP_A=red DROP_B=green PARK=yellow` | 트랙 매핑 (모르면 `-`). 연결할 때, 바뀔 때 보냄 |
-| `EVENT <type> <내용>` | `EVENT LOADED CIRCLE 3` | 주요 사건: `SETUP_STARTED`, `MAPPED <지점> <색>`, `MAP_DONE`, `STARTED`, `LOADED <모양> <개수>`, `UNLOADED <모양> <개수>`, `PARKED`, `OBSTACLE`, `RESUMED`, 개발자 탭 도착 시험 `ARRIVE_TEST`·`ARRIVED <라벨>`·`CANCELLED` |
+| `EVENT <type> <내용>` | `EVENT LOADED CIRCLE 3` | 주요 사건: `SETUP_STARTED`, `MAPPED <지점> <색>`, `MAP_DONE`, `STARTED`, `LOADED <모양> <개수>`, `UNLOADED <모양> <개수>`, `PARKED`, `OBSTACLE`, `RESUMED`, 개발자 탭 도착 시험 `ARRIVE_TEST`·`ARRIVED <라벨>`·`CANCELLED`, 표지판 분류마다 `SIGN <라벨> <점수>`(못 읽으면 `SIGN - <이유>`, 개발자 탭 "표지판 인식" 칸) |
 | `ERROR <code> <내용>` | `ERROR E_MARKER red 갈래 0개` | 오류 발생 (아래 코드표) |
 | `ACK <명령>` / `NAK <명령> <이유>` | `NAK START 작업 중` | 명령 수신 결과 (`DEV`는 3-1절) |
 | `PONG` | `PONG` | PING 응답 |
