@@ -330,3 +330,87 @@ def test_sign_distance_is_18cm():
     for _ in range(3):
         m.handle(Event("RANGE", {"distance": 0.18}))
     assert m.state == State.CHECK_SIGN
+
+
+# ── 도착 순서 (교수 변경 시나리오: 정지선 → 카메라 표지판 쪽 → 전진 → 18cm 정지) ──
+
+def kinds(acts):
+    return [(a.kind, a.data.get("pose") or a.data.get("command")) for a in acts]
+
+
+def test_stop_line_raises_camera_before_approach():
+    m = MissionStateMachine(track_map=FULL)
+    m.state = State.NAVIGATE
+    acts = m.handle(Event("DRIVE_DONE", {"result": "STOP_LINE"}))
+    assert m.state == State.APPROACH and kinds(acts) == [("POSE", "SIGN")]       # 아직 주행하지 않음
+    assert m.handle(Event("RANGE", {"distance": 0.1})) == []                      # 카메라 올리는 중 초음파 무시
+    acts = m.handle(Event("POSE_READY", {"pose": "SIGN"}))
+    assert kinds(acts) == [("DRIVE", "APPROACH")]
+    for _ in range(3):
+        acts = m.handle(Event("RANGE", {"distance": 0.17}))
+    assert m.state == State.CHECK_SIGN and acts[0].kind == "CANCEL_DRIVE"
+
+
+def test_full_work_trip_raises_camera_at_each_stop_line():
+    w = World(sm()).send("SETUP")
+    seq = [(k, d.get("pose") or d.get("command")) for k, d in w.log if k in ("POSE", "DRIVE")]
+    for i, item in enumerate(seq):
+        if item == ("DRIVE", "APPROACH"):
+            assert seq[i - 1] == ("POSE", "SIGN")
+
+
+def test_resume_in_approach_raises_camera_again():
+    m = MissionStateMachine(track_map=FULL)
+    m.state = State.NAVIGATE
+    m.handle(Event("DRIVE_DONE", {"result": "STOP_LINE"}))
+    m.handle(Event("POSE_READY", {"pose": "SIGN"}))
+    m.handle(Event("STOP"))
+    acts = m.handle(Event("RESUME"))
+    assert m.state == State.APPROACH and ("POSE", "SIGN") in kinds(acts) and ("DRIVE", "APPROACH") not in kinds(acts)
+
+
+# ── 도착 시험 (개발자 탭) ──
+
+def arrive_test(label="sign_work", **cfg):
+    m = MissionStateMachine(MissionConfig(**cfg))
+    acts = m.handle(Event("TEST_ARRIVE"))
+    assert m.state == State.NAVIGATE and ("DRIVE", "FOLLOW_TO_EVENT") in kinds(acts)
+    drive = [a for a in acts if a.kind == "DRIVE"][0]
+    assert drive.data["skip"] == 0 and not any(a.kind == "TARGET" for a in acts)   # 목적지 색은 개발자 탭 값 그대로
+    m.handle(Event("DRIVE_DONE", {"result": "STOP_LINE"}))
+    m.handle(Event("POSE_READY", {"pose": "SIGN"}))
+    for _ in range(3):
+        m.handle(Event("RANGE", {"distance": 0.15}))
+    acts = m.handle(Event("POSE_READY", {"pose": "SIGN"}))
+    assert [a.kind for a in acts] == ["CLASSIFY"]
+    return m
+
+
+def test_arrive_test_reports_sign_and_lowers_camera():
+    m = arrive_test()
+    acts = m.handle(Event("SIGN", {"label": "sign_work"}))
+    assert m.state == State.IDLE and ("POSE", "LINE") in kinds(acts)
+    report = [a for a in acts if a.kind == "REPORT"][0].data
+    assert report == {"event": "ARRIVED", "detail": "sign_work"}
+
+
+def test_arrive_test_without_model_is_not_error():
+    m = arrive_test()
+    m.handle(Event("SIGN", {"label": "", "message": "모델 없음"}))                # 다시 한 번 봄
+    acts = m.handle(Event("SIGN", {"label": "", "message": "모델 없음"}))
+    assert m.state == State.IDLE
+    assert [a.data for a in acts if a.kind == "REPORT"] == [{"event": "ARRIVED", "detail": "표지판 못 읽음 모델 없음"}]
+
+
+def test_arrive_test_only_from_idle():
+    m = MissionStateMachine(track_map=FULL)
+    m.state = State.NAVIGATE
+    assert m.handle(Event("TEST_ARRIVE")) == []
+
+
+def test_cancel_stops_and_goes_idle():
+    m = MissionStateMachine()
+    m.handle(Event("TEST_ARRIVE"))
+    acts = m.handle(Event("CANCEL"))
+    assert m.state == State.IDLE and acts[0].kind == "CANCEL_DRIVE" and not m.ctx.test
+    assert m.handle(Event("CANCEL")) == []                                       # IDLE이면 아무것도 안 함

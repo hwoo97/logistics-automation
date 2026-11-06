@@ -1,8 +1,8 @@
 """주행 제어 (② 순수 로직) — 라인 상태 → /cmd_vel (functional_design F4·F5, class_design 3.1).
 
 지금 구현: FOLLOW_TO_EVENT(라인 따라가다 이벤트에서 정지, skip_stop_lines만큼 정지선 통과),
-UTURN(제자리에서 돌아 왔던 라인을 다시 찾음), APPROACH(정지선 뒤 표지판까지 서행, 라인 이벤트 무시 — 멈추는 것은
-mission_node가 초음파로 취소), STOP. TURN·STRAIGHT는 쓰지 않음 (마커 회전은 FOLLOW 안에서).
+UTURN(제자리에서 돌아 왔던 라인을 다시 찾음), APPROACH(정지선 뒤 표지판까지 직진 서행 — 카메라가 표지판 쪽으로
+올라가 있어 라인을 보지 않음, 멈추는 것은 mission_node가 초음파로 취소), STOP. TURN·STRAIGHT는 쓰지 않음 (마커 회전은 FOLLOW 안에서).
 부호: 오프셋 + = 라인이 오른쪽 → 오른쪽으로 돌아야 함 → /cmd_vel z는 음수 (z > 0 = 왼쪽 회전, agv_hw.logic.mix).
 각도 보정: 라인 각도가 90° ± heading_deadband_deg(85~95°)를 벗어나면 벗어난 만큼 회전에 더함.
   각도 < 85 (위쪽이 오른쪽으로 기움) → 오른쪽으로, 각도 > 95 → 왼쪽으로.
@@ -11,9 +11,11 @@ mission_node가 초음파로 취소), STOP. TURN·STRAIGHT는 쓰지 않음 (마
   turn_scale   : 회전 세기 — 노트북 앱에서 주행 중 조정 (흔들리면 낮춤)
 마커 (목적지 색이 정해졌을 때만, 2026-11-02): 목적지 색 스티커가 왼쪽만 = 좌회전, 오른쪽만 = 우회전, 양쪽 = 직진.
   보이면 감속 → 화면 아래쪽까지 오면 정지해 여러 프레임으로 좌우 확정 → 전진 → 제자리 회전.
+  한쪽 스티커라도 그쪽에 라인 갈래(line_node branch_left/right)가 안 보이면 회전하지 않고 직진 (2026-11-06 실차:
+  직진·좌회전 갈래뿐인 곳에서 스티커가 오른쪽 → 오른쪽으로 돌다 왔던 라인을 잡아 유턴이 됨).
   회전은 각도가 아니라 라인으로 끝낸다 (엔코더 없음): 기존 라인이 벗어난 뒤, 새 라인이 기준 근처에 세로에 가깝게 보이면 끝.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from agv_protocol.types import DriveCommand, LineEvent
 
@@ -50,6 +52,7 @@ class DriveConfig:
     marker_check_frames: int = 5    # 이만큼 보고 과반으로 좌우 확정
     marker_settle_s: float = 0.3    # 멈춘 뒤 흔들림이 가라앉을 때까지 기다림
     marker_check_timeout_s: float = 1.5  # 영상이 모자라도 이 시간이면 판단
+    marker_branch_check: bool = True    # 스티커 쪽에 갈래가 안 보이면 직진 (끄면 스티커만 보고 회전)
     marker_ignore_s: float = 2.0    # 직진·회전 뒤 이 시간은 마커 무시 (같은 마커 재인식 방지)
     turn_forward_s: float = 0.7     # 회전 전 전진 시간 — 카메라가 차축보다 앞을 보므로 회전 중심을 분기점 가까이
     turn_speed: float = 0.6         # 제자리 회전 세기
@@ -84,6 +87,8 @@ class LineInput:
     raw_event: LineEvent = LineEvent.NONE
     angle: float = 90.0             # 라인 각도(도), 90 = 똑바로
     angle_valid: bool = False
+    branch_left: bool = False       # 라인과 이어진 왼쪽 갈래가 보임
+    branch_right: bool = False
 
 
 @dataclass
@@ -98,7 +103,7 @@ def merge_stop_line(line: LineInput, detected: bool, confirmed: bool) -> LineInp
     """/line/state에 /stop_line/state 판정을 합침 — 정지선이 있으면 이벤트를 STOP_LINE으로."""
     event = LineEvent.STOP_LINE if confirmed else line.event
     raw = LineEvent.STOP_LINE if detected or confirmed else line.raw_event
-    return LineInput(line.offset, line.line_found, event, raw, line.angle, line.angle_valid)
+    return replace(line, event=event, raw_event=raw)
 
 
 class PidController:
@@ -150,6 +155,9 @@ class DriveController:
         self.event_ignore = 0.0             # 남은 라인 이벤트 무시 시간 (회전 직후)
         self.check_t = None                 # 스티커 앞에 멈춰 좌우를 확인한 시간 (None = 확인 중 아님)
         self.check_counts = [0, 0, 0]       # 본 프레임 수, 왼쪽에 보인 수, 오른쪽에 보인 수
+        self.branch_counts = [0, 0, 0]      # 확인 중 라인 프레임 수, 왼쪽 갈래 보인 수, 오른쪽 갈래 보인 수
+        self.decision = ""                  # 마지막 마커 판단 (로그용) "LEFT", "STRAIGHT (오른쪽 스티커, 오른쪽 갈래 없음)" 등
+        self.decision_no = 0                # 판단할 때마다 1 증가 — drive_node가 바뀐 것을 보고 로그
         self.turn_dir = 0                   # 회전 방향 (+1 왼쪽, -1 오른쪽, 0 = 회전 중 아님)
         self.turn_stage = ""                # FORWARD → LEAVE(기존 라인 벗어나기) → SEEK(새 라인 찾기)
         self.turn_t = 0.0
@@ -247,7 +255,7 @@ class DriveController:
         if self.verify_t is not None:
             return self._step_verify(line, dt)
         if self.check_t is not None:
-            return self._step_check(markers, dt)
+            return self._step_check(markers, dt, line)
         if self.turn_dir:
             return self._step_turn(line, dt)
         if self.command == DriveCommand.APPROACH:
@@ -297,7 +305,7 @@ class DriveController:
         if not seen:
             return line
         drop = lambda e: LineEvent.NONE if e == LineEvent.STOP_LINE else e   # noqa: E731
-        return LineInput(line.offset, line.line_found, drop(line.event), drop(line.raw_event), line.angle, line.angle_valid)
+        return replace(line, event=drop(line.event), raw_event=drop(line.raw_event))
 
     def _steer(self, line: LineInput, dt: float) -> float:
         c = self.cfg
@@ -306,11 +314,9 @@ class DriveController:
         return round(_clip(-c.turn_scale * (self.pid.update(err, dt) + c.kh * heading), c.max_angular), 3)
 
     def _step_approach(self, line: LineInput | None, dt: float) -> DriveOutput:
-        """표지판까지 서행 — 정지선·코너·라인 끝·마커를 모두 무시하고 라인을 따라감. 라인이 안 보이면(표지판 바로 앞) 직진."""
-        if line is None:
-            return self.last
-        angular = self._steer(line, dt) if line.line_found else 0.0
-        self.last = DriveOutput(round(self.cfg.approach_speed, 3), angular)
+        """표지판까지 직진 서행 — 카메라가 표지판 쪽을 보고 있으므로(교수 변경 시나리오 순서) 라인·이벤트·마커를 모두 무시.
+        라인 상태는 영상이 오고 있는지(line_timeout)만 확인하는 데 씀."""
+        self.last = DriveOutput(round(self.cfg.approach_speed, 3), 0.0)
         return self.last
 
     def _step_recheck(self, line: LineInput | None, dt: float) -> DriveOutput:
@@ -345,6 +351,9 @@ class DriveController:
             self.pid.reset()
         return self.last
 
+    def _decide(self, text: str) -> None:
+        self.decision, self.decision_no = text, self.decision_no + 1
+
     def _target_sides(self, markers: list[MarkerInput], min_y: float) -> set[str]:
         """min_y보다 아래(가까이)에 보이는 목적지 색 스티커의 좌우."""
         return {m.side for m in markers if m.color == self.target and m.y >= min_y}
@@ -359,9 +368,10 @@ class DriveController:
         sides = self._target_sides(markers, c.marker_stop_y)
         if len(sides) == 2:
             self._resume_after_marker()
+            self._decide("STRAIGHT (양쪽 스티커)")
             return False
         if sides:
-            self.check_t, self.check_counts = 0.0, [0, 0, 0]
+            self.check_t, self.check_counts, self.branch_counts = 0.0, [0, 0, 0], [0, 0, 0]
             self.marker_near = False
             self.last = DriveOutput(0.0, 0.0)
             return True
@@ -371,16 +381,21 @@ class DriveController:
         self.marker_ignore = self.cfg.marker_ignore_s
         self.marker_near = False
 
-    def _step_check(self, markers: list[MarkerInput] | None, dt: float) -> DriveOutput:
-        """스티커 앞에 멈춰 좌우 확정 — 왼쪽만 좌회전, 오른쪽만 우회전, 양쪽 직진, 사라지면 오판정으로 보고 다시 출발."""
+    def _step_check(self, markers: list[MarkerInput] | None, dt: float, line: LineInput | None = None) -> DriveOutput:
+        """스티커 앞에 멈춰 좌우 확정 — 왼쪽만 좌회전, 오른쪽만 우회전, 양쪽 직진, 사라지면 오판정으로 보고 다시 출발.
+        한쪽 스티커인데 그쪽 갈래가 과반 프레임에서 안 보이면 직진."""
         c = self.cfg
         self.check_t += dt
-        counts = self.check_counts
+        counts, branch = self.check_counts, self.branch_counts
         if markers is not None and self.check_t >= c.marker_settle_s:
             sides = self._target_sides(markers, c.marker_check_y)
             counts[0] += 1
             counts[1] += "left" in sides
             counts[2] += "right" in sides
+        if line is not None and line.line_found and self.check_t >= c.marker_settle_s:
+            branch[0] += 1
+            branch[1] += line.branch_left
+            branch[2] += line.branch_right
         if counts[0] < c.marker_check_frames and self.check_t < c.marker_check_timeout_s:
             return self.last
         self.check_t = None
@@ -388,8 +403,15 @@ class DriveController:
         left, right = counts[1] >= need, counts[2] >= need
         self.pid.reset()
         self._resume_after_marker()
-        if left != right:
-            self.turn_dir, self.turn_stage, self.turn_t, self.turn_frames = (1 if left else -1), "FORWARD", 0.0, 0
+        if left == right:
+            self._decide("STRAIGHT (양쪽 스티커)" if left else "STRAIGHT (스티커 사라짐)")
+            return self.last
+        name = "왼쪽" if left else "오른쪽"
+        if c.marker_branch_check and branch[0] > 0 and branch[1 if left else 2] < branch[0] // 2 + 1:
+            self._decide(f"STRAIGHT ({name} 스티커, {name} 갈래 없음)")
+            return self.last
+        self._decide("LEFT" if left else "RIGHT")
+        self.turn_dir, self.turn_stage, self.turn_t, self.turn_frames = (1 if left else -1), "FORWARD", 0.0, 0
         return self.last
 
     def _line_ahead(self, line: LineInput) -> bool:

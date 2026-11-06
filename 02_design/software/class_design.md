@@ -406,8 +406,9 @@ class MissionStateMachine:
 **전이 예시 (지점 도착 — 작업 모드, 하차 A)**
 | 현재 상태 | 이벤트 | 동작 | 다음 상태 |
 |-----------|--------|------|-----------|
-| NAVIGATE | `DRIVE_DONE(STOP_LINE)`, `skip_stop_lines = 0` | `DRIVE(APPROACH)` | APPROACH |
-| APPROACH | `RANGE(≤ 0.20)` 3회 | `CANCEL_DRIVE`, `POSE(SIGN)` | CHECK_SIGN |
+| NAVIGATE | `DRIVE_DONE(STOP_LINE)`, `skip_stop_lines = 0` | `POSE(SIGN)` (카메라를 표지판 쪽으로, 2026-11-06) | APPROACH (aiming) |
+| APPROACH (aiming) | `POSE_READY(SIGN)` | `DRIVE(APPROACH)` — 직진 서행 | APPROACH |
+| APPROACH | `RANGE(≤ 0.18)` 3회 | `CANCEL_DRIVE`, `POSE(SIGN)` | CHECK_SIGN |
 | CHECK_SIGN | `POSE_READY` | `CLASSIFY(SIGN)` | CHECK_SIGN |
 | CHECK_SIGN | `SIGN(sign_drop_a)` = 기대 목적지 | — | UNLOAD |
 | UNLOAD | `TICK` 1초마다 | `DIGIT(load)`, 마지막에 `LED(OFF)`, `REPORT(UNLOADED)` | UNLOAD |

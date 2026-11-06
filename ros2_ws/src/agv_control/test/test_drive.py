@@ -345,10 +345,16 @@ def see(*sides, y=130.0, color="red"):
     return [MarkerInput(color, s, y) for s in sides]
 
 
-def check(d, *sides, y=130.0):
-    """멈춘 뒤 확인 시간이 끝날 때까지 같은 마커를 본다."""
+def branches(left=False, right=False):
+    """분기점이 보이는 라인 — 갈래 쪽 (line_node branch_left/right)."""
+    return LineInput(0.0, True, angle=90.0, angle_valid=True, branch_left=left, branch_right=right)
+
+
+def check(d, *sides, y=130.0, line=None):
+    """멈춘 뒤 확인 시간이 끝날 때까지 같은 마커를 본다. 라인은 기본으로 스티커 쪽에 갈래가 있는 분기점."""
+    line = line or branches("left" in sides, "right" in sides)
     for _ in range(40):
-        d.step(AHEAD, DT, see(*sides, y=y))
+        d.step(line, DT, see(*sides, y=y))
         if not d.phase.startswith("MARKER"):
             break
 
@@ -445,10 +451,66 @@ def test_check_ignores_far_marker():
     d = marker_drive()
     d.step(AHEAD, DT, see("left"))
     for _ in range(40):
-        d.step(AHEAD, DT, see("left") + see("right", y=50.0))
+        d.step(branches(left=True), DT, see("left") + see("right", y=50.0))
         if not d.phase.startswith("MARKER"):
             break
     assert d.phase == "TURN LEFT"
+
+
+# ── 스티커 쪽에 갈래가 없으면 직진 (2026-11-06 실차: 직진·좌회전 갈래뿐인 곳, 스티커 오른쪽 → 유턴처럼 돎) ──
+
+def test_right_sticker_without_right_branch_goes_straight():
+    d = marker_drive()
+    d.step(AHEAD, DT, see("right"))
+    check(d, "right", line=branches(left=True))              # 왼쪽 갈래만 있음
+    assert d.phase == "FOLLOW" and d.turn_dir == 0
+    assert "갈래 없음" in d.decision
+    out = d.step(AHEAD, DT, see("right"))                    # 같은 스티커로 다시 멈추지 않고 전진
+    assert out.linear > 0 and d.phase == "FOLLOW"
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_sticker_without_any_branch_goes_straight(side):
+    d = marker_drive()
+    d.step(AHEAD, DT, see(side))
+    check(d, side, line=branches())
+    assert d.phase == "FOLLOW" and d.turn_dir == 0
+
+
+def test_branch_seen_in_minority_of_frames_goes_straight():
+    d = marker_drive()
+    d.step(AHEAD, DT, see("left"))
+    lines = iter([branches(left=True)] + [branches()] * 40)
+    for _ in range(40):
+        d.step(next(lines), DT, see("left"))
+        if not d.phase.startswith("MARKER"):
+            break
+    assert d.phase == "FOLLOW"
+
+
+def test_branch_check_off_turns_on_sticker_only():
+    d = marker_drive(marker_branch_check=False)
+    d.step(AHEAD, DT, see("right"))
+    check(d, "right", line=branches(left=True))
+    assert d.phase == "TURN RIGHT"
+
+
+def test_without_line_frames_turns_on_sticker_only():
+    """확인 중 라인 상태를 하나도 못 받으면 갈래를 모름 → 스티커대로 회전 (이전 동작)."""
+    d = marker_drive()
+    d.step(AHEAD, DT, see("left"))
+    for _ in range(40):
+        d.step(None, DT, see("left"))
+        if not d.phase.startswith("MARKER"):
+            break
+    assert d.phase == "TURN LEFT"
+
+
+def test_decision_counter_increases_each_time():
+    d = marker_drive()
+    d.step(AHEAD, DT, see("left"))
+    check(d, "left")
+    assert d.decision == "LEFT" and d.decision_no == 1
 
 
 def turning(side="left", **cfg):
@@ -740,10 +802,12 @@ def test_approach_slow_and_ignores_events():
         assert not out.done and out.linear == pytest.approx(c.approach_speed) and d.phase == "APPROACH"
 
 
-def test_approach_steers_and_goes_straight_when_line_gone():
+def test_approach_goes_straight_ignoring_line():
+    """카메라가 표지판 쪽으로 올라가 있어 보이는 '라인'은 믿을 수 없음 → 직진 (2026-11-06 순서 변경)."""
     d = DriveController()
     d.start(DriveCommand.APPROACH)
-    assert d.step(LineInput(0.4, True), DT).angular < 0          # 라인이 오른쪽 → 오른쪽으로
+    out = d.step(LineInput(0.4, True, angle=60.0, angle_valid=True), DT)
+    assert out.angular == 0 and out.linear == pytest.approx(DriveConfig().approach_speed)
     out = d.step(LineInput(0.4, False), DT)
     assert out.angular == 0 and out.linear > 0
 

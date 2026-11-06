@@ -34,7 +34,7 @@
 |--------|------|------|
 | `STATUS <state> <mode> <done>/<total> <cargo> <load> <target>` | `STATUS NAVIGATE WORK 0/5 CIRCLE 3 DROP_A` | 현재 상태 (2Hz + 상태가 바뀔 때). mode = NONE·SETUP·WORK. 작업: done/total = 하차한 수/입력한 수, load = 실은 개수(7세그먼트). 초기 설정: done/total = 확인한 지점/4, target = 탐색 중인 색 |
 | `MAP <지점>=<색> ×4` | `MAP WORK=blue DROP_A=red DROP_B=green PARK=yellow` | 트랙 매핑 (모르면 `-`). 연결할 때, 바뀔 때 보냄 |
-| `EVENT <type> <내용>` | `EVENT LOADED CIRCLE 3` | 주요 사건: `SETUP_STARTED`, `MAPPED <지점> <색>`, `MAP_DONE`, `STARTED`, `LOADED <모양> <개수>`, `UNLOADED <모양> <개수>`, `PARKED`, `OBSTACLE`, `RESUMED` |
+| `EVENT <type> <내용>` | `EVENT LOADED CIRCLE 3` | 주요 사건: `SETUP_STARTED`, `MAPPED <지점> <색>`, `MAP_DONE`, `STARTED`, `LOADED <모양> <개수>`, `UNLOADED <모양> <개수>`, `PARKED`, `OBSTACLE`, `RESUMED`, 개발자 탭 도착 시험 `ARRIVE_TEST`·`ARRIVED <라벨>`·`CANCELLED` |
 | `ERROR <code> <내용>` | `ERROR E_MARKER red 갈래 0개` | 오류 발생 (아래 코드표) |
 | `ACK <명령>` / `NAK <명령> <이유>` | `NAK START 작업 중` | 명령 수신 결과 (`DEV`는 3-1절) |
 | `PONG` | `PONG` | PING 응답 |
@@ -61,12 +61,13 @@
 | `DEV POSE <LINE\|JUNCTION\|SIGN>` | `DEV POSE SIGN` | 팬틸트 정해진 자세 | `/pantilt/pose` | IDLE, MANUAL, ESTOP, ERROR |
 | `DEV SERVO <pan> <tilt>` | `DEV SERVO 90 60` | 팬·틸트 각도 직접 지정 (0~180°) | `/dev/pantilt_angle` | IDLE, MANUAL, ESTOP, ERROR |
 | `DEV WHEEL <l1> <l2> <l3> <l4>` | `DEV WHEEL 0.3 0.3 0 0` | 바퀴 4개 개별 듀티 (-1.0~1.0, 0.3초마다 반복, 끊기면 정지) | `/dev/wheels` | IDLE, MANUAL |
-| `DEV DRIVE <FOLLOW\|UTURN\|STOP>` | `DEV DRIVE FOLLOW` | 시험용 라인 주행 시작(drive_node FOLLOW_TO_EVENT)·유턴(UTURN, 라인을 다시 찾으면 멈춤)·정지(취소). 주행 중에는 `MANUAL ON`·`DEV WHEEL`·`DEV DRIVE FOLLOW`·`DEV DRIVE UTURN` 거부. 결과는 `DEV DRIVE RUNNING` / `DEV DRIVE RECHECK 2/3`(라인 끝 후 정지해서 다시 보는 중) / `DEV DRIVE VERIFY STOP_LINE`(판정 후 정지해서 확인 중) / `DEV DRIVE MARKER red`(마커 앞에 멈춰 좌우 확인 중) / `DEV DRIVE TURN LEFT`(회전 중) / `DEV DRIVE UTURN`(유턴 중) / `DEV DRIVE DONE <끝난 이유>` / `DEV DRIVE REJECTED <이유>` | `/drive` 액션 | FOLLOW·UTURN: IDLE, STOP: 모든 상태 |
+| `DEV DRIVE <FOLLOW\|UTURN\|ARRIVE\|STOP>` | `DEV DRIVE FOLLOW` | 시험용 라인 주행 시작(drive_node FOLLOW_TO_EVENT)·유턴(UTURN, 라인을 다시 찾으면 멈춤)·**도착 시험**(ARRIVE — mission_node: 목적지 색으로 정지선까지 → 카메라 표지판 쪽 → 직진 → 약 18cm 정지 → 분류 → `EVENT ARRIVED <라벨 또는 못 읽음>`, 카메라 내리고 IDLE. agv.launch.py에서만, standalone이면 NAK)·정지(취소, mission 연동이면 mission_node에도 `CANCEL` → `EVENT CANCELLED`). 주행 중에는 `MANUAL ON`·`DEV WHEEL`·`DEV DRIVE FOLLOW`·`DEV DRIVE UTURN` 거부. 결과는 `DEV DRIVE RUNNING` / `DEV DRIVE RECHECK 2/3`(라인 끝 후 정지해서 다시 보는 중) / `DEV DRIVE VERIFY STOP_LINE`(판정 후 정지해서 확인 중) / `DEV DRIVE MARKER red`(마커 앞에 멈춰 좌우 확인 중) / `DEV DRIVE TURN LEFT`(회전 중) / `DEV DRIVE UTURN`(유턴 중) / `DEV DRIVE DONE <끝난 이유>` / `DEV DRIVE REJECTED <이유>` | `/drive` 액션 | FOLLOW·UTURN: IDLE, STOP: 모든 상태 |
 | `DEV TARGET <RED\|GREEN\|BLUE\|YELLOW\|NONE>` | `DEV TARGET RED` | 시험용 목적지 색, NONE이면 마커를 보지 않음. 주행 중에도. 앱은 연결할 때마다 다시 보냄 | `/drive/target` | 모든 상태 |
 | `DEV TUNE <TURN\|CENTER\|FORWARD\|SPIN\|CONFIRM\|LINE_END> <v>` | `DEV TUNE TURN 0.6` | 라인 주행 조정 — TURN 회전 세기(0.1~1.5), CENTER 라인 기준 위치(-0.5~0.5, 음수 = 화면 왼쪽), FORWARD 마커 회전 전 전진 시간(0~2초), SPIN 제자리 회전 세기(0.2~1) → `/drive/tune` · CONFIRM 정지선·코너 확정 프레임(1~10 정수), LINE_END 라인 끝 확정 프레임(3~30 정수) → `/line/tune`. 주행 중에도. 앱은 연결할 때마다 저장된 값을 다시 보냄 | `/drive/tune`·`/line/tune` (String "TURN 0.6") | 모든 상태 |
 | `DEV SPEED <v>` | `DEV SPEED 0.7` | 라인 주행 기본 속도 (0.2~1.0) — drive_node에 바로 적용, 주행 중에도 | `/drive/speed` | 모든 상태 |
 | `DEV WATCH <RANGE\|LINE\|SYS\|ALL> <ON\|OFF>` | `DEV WATCH RANGE ON` | 측정값 보내기 켜기/끄기 (연결 끊기면 모두 꺼짐) | — | 모든 상태 |
 | `DEV NODES` | `DEV NODES` | 실행 중인 ROS 노드 목록 요청 | — | 모든 상태 |
+| `DEV CAL <AUTO\|RESET>` | `DEV CAL AUTO` | 카메라 팬 정면 자동 맞춤(곧은 라인 위에서, line_node 필요) / 저장값 지우기. 결과는 `DEV CAL …` | `/pantilt/calibrate` | IDLE |
 
 **Pi → 노트북** (켠 항목만, 5Hz 이하)
 | 메시지 | 예시 | 의미 |
@@ -76,6 +77,7 @@
 | `DEV LINE <offset> <event> [<raw_event> [<angle>]]` | `DEV LINE -0.12 NONE STOP_LINE 87.5` | 라인 오프셋(-1~1), 확정 이벤트, 이번 프레임 판정(확인 전, 생략 시 event와 같음), 라인 각도(도, 90 = 똑바로, 못 믿으면 `-`) — `/line/state` |
 | `DEV SYS <temp_c> <cpu_pct> <mem_pct>` | `DEV SYS 52.1 37 41` | Pi CPU 온도·사용률·메모리 (1Hz) |
 | `DEV NODES <이름,...>` | `DEV NODES camera,led_node,motor_node` | `DEV NODES` 응답 |
+| `DEV CAL <RUNNING 팬 각도\|DONE 팬\|FAIL 이유\|RESET 팬\|CANCELLED>` | `DEV CAL DONE 66.0` | 정면 자동 맞춤 진행·결과 (`/pantilt/calibration`) |
 
 - `DEV` 명령의 수신 결과는 `ACK DEV <하위명령>` / `NAK DEV <하위명령> <이유>` (예: `NAK DEV WHEEL NAVIGATE 상태에서 불가`)
 - `mission_node`가 아직 없을 때(단위 개발 단계) 상태는 `IDLE`로 본다

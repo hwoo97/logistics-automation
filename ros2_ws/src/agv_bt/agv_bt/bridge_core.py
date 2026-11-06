@@ -3,15 +3,16 @@
 출력은 io 객체의 메서드로 내보낸다 (노드는 이를 ROS 토픽 발행으로 연결, 시험은 가짜 io로 확인).
   io.send(line) / io.estop(bool) / io.cmd_vel(v, w) / io.led(state) / io.pose(name)
   io.servo(pan, tilt) / io.wheels([l1..l4]) / io.speed(v) / io.drive("FOLLOW"|"STOP") / io.tune(key, v)
-  io.node_names() -> list
+  io.node_names() -> list / io.calibrate("AUTO"|"RESET")
   io.mission(cmd)
 
 standalone=True : mission_node가 없는 단위 개발 단계. 상태(IDLE·MANUAL·ESTOP)를 브리지가 직접 관리한다.
 standalone=False: SETUP·START·STOP·RESUME·MANUAL·MOVE는 mission_node로 넘기고 상태·매핑은 /mission/status를 따른다.
   START는 매핑 4개가 없으면 여기서 거부(NAK). mission_node가 없으면 상태가 바뀌지 않으므로 standalone으로 쓴다.
+  DEV DRIVE ARRIVE(도착 시험)는 mission_node TEST_ARRIVE로, DEV DRIVE STOP은 주행 정지 + mission_node CANCEL (2026-11-06).
 """
 from agv_protocol.messages import (
-    WATCH_KEYS, check_allowed, command_key, format_ack, format_dev, format_error, format_event,
+    WATCH_KEYS, Command, check_allowed, command_key, format_ack, format_dev, format_error, format_event,
     format_map, format_nak, format_pong, format_status, parse_command,
 )
 
@@ -92,6 +93,8 @@ class BridgeCore:
         reason = check_allowed(cmd, self.state)
         if not reason and self.driving and cmd.key in ("MANUAL ON", "DEV WHEEL", "DEV DRIVE")                 and cmd.args[-1:] != ["STOP"]:
             reason = "라인 주행 중 — DEV DRIVE STOP 먼저"           # /cmd_vel·바퀴 명령이 겹치지 않게
+        if not reason and self.standalone and cmd.key == "DEV DRIVE" and cmd.args[1:] == ["ARRIVE"]:
+            reason = "mission_node 없음 — agv.launch.py로 실행"
         if reason:
             self.io.send(format_nak(cmd.key, reason))
             return
@@ -141,8 +144,12 @@ class BridgeCore:
             self.io.wheels([float(v) for v in rest])
         elif sub == "SPEED":
             self.io.speed(float(rest[0]))
+        elif sub == "DRIVE" and rest[0] == "ARRIVE":
+            self.io.mission(Command("TEST_ARRIVE"))
         elif sub == "DRIVE":
             self.io.drive(rest[0])
+            if rest[0] == "STOP" and not self.standalone:
+                self.io.mission(Command("CANCEL"))          # 도착 시험·초기 설정·작업 중이었으면 mission도 멈춤
         elif sub == "TUNE":
             self.io.tune(rest[0], float(rest[1]))
         elif sub == "TARGET":
@@ -153,3 +160,9 @@ class BridgeCore:
                 (self.watches.add if rest[1] == "ON" else self.watches.discard)(k)
         elif sub == "NODES":
             self.io.send(format_dev("NODES", sorted(self.io.node_names())))
+        elif sub == "CAL":
+            self.io.calibrate(rest[0])
+
+    def on_calibration(self, text: str):
+        """pantilt_node /pantilt/calibration → 앱 (DEV CAL RUNNING 66.0 87.5 / DONE 66.0 / FAIL 이유 …)."""
+        self.io.send(f"DEV CAL {text}".rstrip())

@@ -54,6 +54,8 @@ class BtBridgeNode(Node):
         self.pub_tune = self.create_publisher(String, "/drive/tune", q10)
         self.pub_line_tune = self.create_publisher(String, "/line/tune", q10)
         self.pub_target = self.create_publisher(String, "/drive/target", q10)
+        self.pub_calibrate = self.create_publisher(String, "/pantilt/calibrate", q10)
+        self.create_subscription(String, "/pantilt/calibration", lambda m: self.core.on_calibration(m.data), q10)
         self.create_subscription(Range, "/ultrasonic/range", self.on_range, qos_profile_sensor_data)
         try:                                                  # agv_interfaces가 없으면 LINE만 빠짐
             from agv_interfaces.msg import LineState, MarkerState, StopLineState
@@ -127,6 +129,10 @@ class BtBridgeNode(Node):
             self.pub_line_tune.publish(String(data=f"{key} {int(value)}"))
         else:
             self.pub_tune.publish(String(data=f"{key} {float(value)}"))
+
+    def calibrate(self, action):
+        """DEV CAL — 카메라 팬 정면 자동 맞춤(AUTO)·저장값 지우기(RESET) → pantilt_node."""
+        self.pub_calibrate.publish(String(data=action))
 
     def target(self, color):
         """DEV TARGET — 시험용 목적지 색. drive_node는 소문자 색 이름 또는 NONE을 받는다."""

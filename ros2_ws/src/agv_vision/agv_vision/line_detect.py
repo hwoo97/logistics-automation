@@ -13,6 +13,9 @@
   중간 띠       : 고른 라인과 **이어진** 가로 검은 영역 — 폭·화면 양끝 도달 → 코너
   먼 띠(위)     : 고른 라인과 이어진 가운데 쪽 세로 라인 = "앞쪽 라인 있음"
   (가중치는 라인 고르기에만 — 코너 라인은 화면 끝까지 뻗어야 하므로 이벤트는 "이어져 있는지"로 거른다)
+  옆 갈래(branch_left/right): 관심 영역보다 위(branch_top_ratio)까지 넓혀, 고른 라인과 이어진 가로 검은 구간이
+                라인 중심에서 왼쪽·오른쪽으로 branch_reach(화면 폭 비율) 이상 뻗은 줄이 branch_rows줄 이상이면 그쪽 갈래 있음.
+                마커 앞에 멈춰 확인할 때 drive가 씀 — 스티커 쪽에 갈래가 없으면 회전하지 않고 직진 (2026-11-06)
   갈림길(분기점)은 판정하지 않는다 → 색 마커 인식이 맡음 (2026-10-30 결정). T자·옆 갈래 모양은 NONE,
   마커를 놓쳐 T자에서 라인이 끊기면 LINE_END로 멈춘다.
 검정 = 줄의 바닥 밝기보다 충분히 어둡고 + 색이 없음(S가 낮음) → 반사·그림자에 강하고, 빨강·파랑 마커는 라인으로 잡히지 않음.
@@ -48,6 +51,9 @@ class LineConfig:
     bottom_bonus: float = 1.5           # 화면 맨 아래(차량 바로 앞)에 닿는 덩어리 가산
     confirm_frames: int = 3
     line_end_frames: int = 10           # 라인 끝만 더 오래 확인 — 흔들림·반사로 잠깐 놓친 것을 끝으로 보지 않게 (2026-10-30 S1)
+    branch_top_ratio: float = 0.2       # 옆 갈래는 화면 위에서 이 비율 아래부터 끝까지 봄 (마커 앞에 섰을 때 분기점이 관심 영역보다 멂)
+    branch_reach: float = 0.2           # 라인 중심에서 화면 폭의 이 비율 이상 옆으로 뻗어야 갈래
+    branch_rows: int = 3                # 그런 줄이 이만큼 있어야 갈래
 
 
 @dataclass
@@ -58,6 +64,8 @@ class LineResult:
     raw_event: LineEvent    # 이번 프레임 판정 (확인 전)
     angle: float = 90.0     # 라인 각도(도) — 90 = 똑바로, 90 미만 = 위쪽이 오른쪽으로 기움
     angle_valid: bool = False
+    branch_left: bool = False   # 라인과 이어진 왼쪽 갈래가 보임 (마커 앞 회전 판단용)
+    branch_right: bool = False
 
 
 class EventConfirmer:
@@ -83,13 +91,15 @@ class EventConfirmer:
         return event if event != LineEvent.NONE and self.count >= need else LineEvent.NONE
 
 
-def black_mask(bgr: np.ndarray, cfg: LineConfig) -> np.ndarray:
+def black_mask(bgr: np.ndarray, cfg: LineConfig, spread: int = 0) -> np.ndarray:
     """바닥보다 충분히 어둡고 색이 없는 픽셀 = 255. 기준 = 줄마다 상위 10% 밝기(바닥) × black_ratio.
     고정 문턱이면 광택 테이프가 반사로 밝아질 때 라인을 잃음 (2026-11-02 실제 사진: 라인 V 약 124, 바닥 약 190)."""
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
     s = hsv[..., 1]
     v = cv2.medianBlur(hsv[..., 2], cfg.black_blur)             # 테라조 바닥 무늬·테이프 반사 얼룩 완화
     floor = np.percentile(v, 90, axis=1, keepdims=True)
+    if spread:      # 위아래 spread줄 중 가장 밝은 바닥 — 가로 테이프가 줄 전체를 덮으면 그 줄의 바닥이 검게 잡히는 것 방지
+        floor = cv2.dilate(floor.astype(np.uint8), np.ones((2 * spread + 1, 1), np.uint8)).astype(float)
     mask = ((v <= cfg.black_ratio * floor) & (v <= cfg.black_v_max) & (s <= cfg.black_s_max)).astype(np.uint8) * 255
     return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
@@ -151,8 +161,39 @@ class LineDetector:
         self.lost_frames = 0
         raw = self.detect_event(line, self.line_px)
         angle = self.line_angle(line)
+        left, right = self.branch_sides(img)
         return LineResult(round(self.offset, 3), True, self.confirm.push(raw), raw,
-                          round(angle, 1) if angle is not None else 90.0, angle is not None)
+                          round(angle, 1) if angle is not None else 90.0, angle is not None, left, right)
+
+    def branch_sides(self, img: np.ndarray) -> tuple[bool, bool]:
+        """(왼쪽 갈래, 오른쪽 갈래). 화면 branch_top_ratio 아래 전체에서 맨 아래 라인 위치와 이어진 덩어리를 골라
+        아래→위로 라인 중심을 따라가며, 그 줄에서 라인을 포함한 검은 구간이 옆으로 branch_reach 이상 뻗었는지 센다.
+        가는 줄에서만 중심을 옮김 — 분기점의 넓은 줄에서는 직전 중심 유지."""
+        c = self.cfg
+        region = img[int(c.height * c.branch_top_ratio):, :]
+        mask = black_mask(region, c, spread=c.max_line_px)
+        _, labels = cv2.connectedComponents(mask, connectivity=8)
+        ref = (self.offset + 1) * c.width / 2
+        bottom = labels[-max(3, mask.shape[0] // 10):, max(0, int(ref - c.max_line_px)): int(ref + c.max_line_px) + 1]
+        ids, counts = np.unique(bottom[bottom > 0], return_counts=True)
+        if not len(ids):
+            return False, False
+        comp = labels == ids[np.argmax(counts)]
+        reach = c.branch_reach * c.width
+        left = right = 0
+        for y in range(comp.shape[0] - 1, -1, -1):
+            spans = _spans(comp[y])
+            if not spans:
+                continue
+            a, b = min(spans, key=lambda s: 0 if s[0] <= ref <= s[1] else min(abs(s[0] - ref), abs(s[1] - ref)))
+            if not (a - c.max_line_px <= ref <= b + c.max_line_px):
+                continue                                            # 라인과 떨어진 구간
+            if b - a + 1 <= c.max_line_px:
+                ref = (a + b) / 2
+                continue
+            left += ref - a >= reach
+            right += b - ref >= reach
+        return left >= c.branch_rows, right >= c.branch_rows
 
     def _lost(self, mask: np.ndarray) -> LineResult:
         """가까운 띠에서 라인을 못 찾음. 직전 라인 위치 근처 위쪽(중간·먼 띠)에 라인 모양이 보이면 잠깐 놓친 것(NONE),

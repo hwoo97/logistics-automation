@@ -31,17 +31,18 @@ ALLOWED_STATES = {
     "DEV SERVO": _HW_STATES,
     "DEV WHEEL": frozenset({"IDLE", "MANUAL"}),
     "DEV SPEED": ALL_STATES,              # 주행 중에도 속도 조절
-    "DEV DRIVE": ALL_STATES,              # STOP은 언제나, FOLLOW·UTURN은 IDLE에서만 (check_allowed)
+    "DEV DRIVE": ALL_STATES,              # STOP은 언제나, FOLLOW·UTURN·ARRIVE는 IDLE에서만 (check_allowed)
     "DEV TUNE": ALL_STATES,               # 주행 중에도 조정
     "DEV TARGET": ALL_STATES,             # 시험용 목적지 색 — 주행 중에도
     "DEV WATCH": ALL_STATES,
     "DEV NODES": ALL_STATES,
+    "DEV CAL": frozenset({"IDLE"}),       # 카메라 팬 정면 자동 맞춤 — 차가 서 있을 때만
 }
 
 WATCH_KEYS = ("RANGE", "LINE", "MARKER", "SYS")
 TARGET_COLORS = ("RED", "GREEN", "BLUE", "YELLOW", "NONE")   # DEV TARGET — NONE이면 마커를 보지 않고 라인만 따라감
 SPEED_RANGE = (0.2, 1.0)        # DEV SPEED — drive_node 기본 선속도
-DRIVE_ACTIONS = ("FOLLOW", "UTURN", "STOP")      # DEV DRIVE — 시험용 라인 주행 시작, 유턴, 정지
+DRIVE_ACTIONS = ("FOLLOW", "UTURN", "ARRIVE", "STOP")   # DEV DRIVE — 시험용 라인 주행 시작, 유턴, 도착 시험(mission_node), 정지
 TUNE_RANGES = {"TURN": (0.1, 1.5),      # DEV TUNE — 회전 세기 (회전량 전체에 곱함)            → drive_node
                "CENTER": (-0.5, 0.5),   #            라인 기준 위치 (오프셋 목표, 음수 = 화면 왼쪽) → drive_node
                "FORWARD": (0.0, 2.0),   #            마커 회전 전 전진 시간(초)                 → drive_node
@@ -49,6 +50,7 @@ TUNE_RANGES = {"TURN": (0.1, 1.5),      # DEV TUNE — 회전 세기 (회전량 
                "CONFIRM": (1, 10),      #            정지선·코너 확정 프레임 수 (정수)          → line_node
                "LINE_END": (3, 30)}     #            라인 끝 확정 프레임 수 (정수)              → line_node
 TUNE_INT_KEYS = ("CONFIRM", "LINE_END")
+CAL_ACTIONS = ("AUTO", "RESET")                 # DEV CAL — 팬 정면 자동 맞춤 시작, 저장값 지우기 (pantilt_node)
 LINE_TUNE_KEYS = ("CONFIRM", "LINE_END")       # 브리지가 /line/tune으로, 나머지는 /drive/tune으로
 
 
@@ -128,6 +130,10 @@ def _validate_dev(cmd: Command) -> None:
     elif sub == "NODES":
         if rest:
             raise ValueError("DEV NODES: 인자 없음")
+    elif sub == "CAL":
+        if len(rest) != 1 or rest[0].upper() not in CAL_ACTIONS:
+            raise ValueError(f"DEV CAL: {'/'.join(CAL_ACTIONS)} 중 하나")
+        cmd.args[1] = rest[0].upper()
     else:
         raise ValueError(f"DEV: 알 수 없는 하위 명령 ({sub})")
 
@@ -292,6 +298,8 @@ def parse_reply(line: str) -> dict:
                 return {"type": "DEV", "kind": kind, "state": rest[1], "result": " ".join(rest[2:])}
             if kind == "NODES":
                 return {"type": "DEV", "kind": kind, "nodes": rest[1].split(",") if len(rest) > 1 else []}
+            if kind == "CAL":                   # DEV CAL <RUNNING 팬 각도|-|DONE 팬|FAIL 이유|RESET 팬|CANCELLED>
+                return {"type": "DEV", "kind": kind, "state": rest[1], "detail": " ".join(rest[2:])}
     except (IndexError, ValueError) as e:
         raise ValueError(f"형식 오류: {line!r} ({e})") from None
     raise ValueError(f"알 수 없는 메시지: {line!r}")

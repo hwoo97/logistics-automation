@@ -344,3 +344,75 @@ def test_confirmer_resets_on_change():
     assert c.push(LineEvent.STOP_LINE) == LineEvent.NONE
     assert c.push(LineEvent.CORNER_LEFT) == LineEvent.NONE
     assert c.push(LineEvent.CORNER_LEFT) == LineEvent.CORNER_LEFT
+
+
+# ── 옆 갈래 (마커 앞 회전 판단, 2026-11-06) — 분기점은 관심 영역보다 위(멀리)에 있음 ──
+BRANCH_Y = (100, 112)
+
+
+@pytest.mark.parametrize("x0, x1, expect", [
+    (0, 170, (True, False)),            # 직진 + 왼쪽 갈래 (사용자 트랙: 스티커가 오른쪽이면 직진해야 함)
+    (150, W, (False, True)),            # 직진 + 오른쪽 갈래
+    (0, W, (True, True)),               # 십자
+], ids=["left", "right", "cross"])
+def test_branch_sides_above_roi(x0, x1, expect):
+    img = floor()
+    vline(img, 160)
+    hline(img, x0, x1, BRANCH_Y)
+    r = run(img)
+    assert (r.branch_left, r.branch_right) == expect
+    assert r.event == LineEvent.NONE                    # 관심 영역 밖이라 라인 이벤트에는 영향 없음
+
+
+def test_branch_t_junction_line_ends():
+    img = floor()
+    vline(img, 160, BRANCH_Y[0], H)
+    hline(img, 0, W, BRANCH_Y)
+    r = run(img)
+    assert r.branch_left and r.branch_right
+
+
+def test_no_branch_on_straight_line():
+    img = floor()
+    vline(img, 160)
+    r = run(img)
+    assert not r.branch_left and not r.branch_right
+
+
+def test_separate_line_is_not_branch():
+    """라인과 떨어진 가로선(다른 구간 트랙)은 갈래가 아님."""
+    img = floor()
+    vline(img, 160)
+    hline(img, 0, 120, BRANCH_Y)                        # 라인에서 30px 떨어져 끝남
+    r = run(img)
+    assert not r.branch_left and not r.branch_right
+
+
+def test_short_stub_is_not_branch():
+    """라인 옆으로 조금 튀어나온 것(테이프 이음새 등)은 갈래가 아님."""
+    img = floor()
+    vline(img, 160)
+    hline(img, 130, 190, BRANCH_Y)
+    r = run(img)
+    assert not r.branch_left and not r.branch_right
+
+
+def test_branch_with_tilted_line():
+    """라인이 비스듬해도 중심을 따라가며 찾음."""
+    img = floor()
+    for y in range(H):
+        x = int(200 - (H - y) * 0.25)
+        img[y, x - LW // 2: x + LW // 2] = 25
+    hline(img, 0, 170, BRANCH_Y)
+    r = run(img)
+    assert r.branch_left and not r.branch_right
+
+
+def test_colored_marker_beside_line_is_not_branch():
+    img = floor()
+    vline(img, 160)
+    import cv2
+    cv2.circle(img, (110, 106), 9, (40, 40, 220), -1)   # 빨강 스티커
+    cv2.circle(img, (60, 106), 9, (40, 40, 220), -1)
+    r = run(img)
+    assert not r.branch_left and not r.branch_right

@@ -198,3 +198,46 @@ def test_video_streamer():
     s.update("bgr8", 480, 640, 640 * 3, img.tobytes())
     assert s.next_frame(1.1) is None                    # 0.2초 간격 전
     assert s.next_frame(1.25) is not None
+
+
+def test_arrive_test_goes_to_mission():
+    """도착 시험(개발자 탭) — mission_node TEST_ARRIVE, 정지는 주행 정지 + mission CANCEL (2026-11-06)."""
+    io = FakeIO()
+    c = BridgeCore(io, standalone=False)
+    c.on_mission_status("IDLE", "NONE", 0, 0, "NONE", 0, "NONE", {})
+    c.on_line("DEV DRIVE ARRIVE")
+    sent = [a[1] for a in io.calls if a[0] == "mission"]
+    assert io.replies("ACK")[-1]["command"] == "DEV DRIVE" and [m.kind for m in sent] == ["TEST_ARRIVE"]
+    assert not any(a[0] == "drive" for a in io.calls)
+    c.on_line("DEV DRIVE STOP")
+    assert ("drive", "STOP") in io.calls and [a[1].kind for a in io.calls if a[0] == "mission"][-1] == "CANCEL"
+
+
+def test_arrive_test_needs_mission_node(core):
+    c, io = core
+    c.on_line("DEV DRIVE ARRIVE")
+    assert io.replies("NAK")[-1]["command"] == "DEV DRIVE"
+    assert not any(a[0] in ("mission", "drive") for a in io.calls)
+
+
+def test_standalone_drive_stop_does_not_touch_mission(core):
+    c, io = core
+    c.on_line("DEV DRIVE STOP")
+    assert ("drive", "STOP") in io.calls and not any(a[0] == "mission" for a in io.calls)
+
+
+def test_calibration_command_and_reply(core):
+    """카메라 팬 정면 자동 맞춤 — DEV CAL AUTO → io.calibrate, pantilt_node 결과는 DEV CAL 줄로 (2026-11-06)."""
+    c, io = core
+    c.on_line("DEV CAL auto")
+    assert ("calibrate", "AUTO") in io.calls and io.replies("ACK")[-1]["command"] == "DEV CAL"
+    c.on_calibration("FAIL 라인이 안 보임")
+    r = io.replies("DEV")[-1]
+    assert r["kind"] == "CAL" and r["state"] == "FAIL" and r["detail"] == "라인이 안 보임"
+
+
+def test_calibration_only_when_idle(core):
+    c, io = core
+    c.on_line("MANUAL ON")
+    c.on_line("DEV CAL AUTO")
+    assert io.replies("NAK")[-1]["command"] == "DEV CAL" and ("calibrate", "AUTO") not in io.calls

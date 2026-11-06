@@ -178,3 +178,19 @@ def test_uturn_only_starts_in_idle():
     assert check_allowed(parse_command("DEV DRIVE UTURN"), "IDLE") is None
     assert check_allowed(parse_command("DEV DRIVE UTURN"), "ESTOP")
     assert check_allowed(parse_command("DEV DRIVE STOP"), "ESTOP") is None
+
+
+@pytest.mark.parametrize("line, ok", [("DEV CAL AUTO", True), ("DEV CAL reset", True), ("DEV CAL", False),
+                                      ("DEV CAL PAN", False), ("DEV CAL AUTO 1", False)])
+def test_dev_cal(line, ok):
+    if ok:
+        assert parse_command(line).args[1] in ("AUTO", "RESET")
+    else:
+        with pytest.raises(ValueError):
+            parse_command(line)
+
+
+def test_parse_dev_cal_reply():
+    r = parse_reply("DEV CAL RUNNING 66.5 87.2")
+    assert r == {"type": "DEV", "kind": "CAL", "state": "RUNNING", "detail": "66.5 87.2"}
+    assert parse_reply("DEV CAL DONE 66.0")["detail"] == "66.0"

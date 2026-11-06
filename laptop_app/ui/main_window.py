@@ -292,6 +292,7 @@ class MainWindow:
         if t == "STATUS":
             self.user.update_status(r)
             self.dev.update_state(r["state"])
+            self.dev.show_arrive_state(r["state"])
             self.dev.video.set_overlay(r["state"])
             if r["state"] == "ESTOP" and self.last_state != "ESTOP":
                 self.dev.stop_wheels()
@@ -300,8 +301,10 @@ class MainWindow:
             self.user.update_map(r["map"])
         elif t == "EVENT":
             self.user.add_event(f"{r['event']} {r['detail']}".strip())
+            self.dev.show_arrive_event(r["event"], r["detail"])
         elif t == "ERROR":
             self.user.add_event(f"오류 {r['code']} {r['detail']}".strip(), error=True)
+            self.dev.show_arrive_event("ERROR", f"{r['code']} {r['detail']}".strip())
         elif t == "NAK":
             self.user.add_event(f"거부 {r['command']}: {r['reason']}", error=True)
         elif t == "DEV":

@@ -38,6 +38,9 @@ class LineNode(Node):
             bottom_bonus=p("bottom_bonus", d.bottom_bonus).value,
             confirm_frames=p("confirm_frames", d.confirm_frames).value,
             line_end_frames=p("line_end_frames", d.line_end_frames).value,
+            branch_top_ratio=p("branch_top_ratio", d.branch_top_ratio).value,
+            branch_reach=p("branch_reach", d.branch_reach).value,
+            branch_rows=p("branch_rows", d.branch_rows).value,
         )
         self.enabled = p("enabled", True).value
         self.detector = LineDetector(cfg)
@@ -107,7 +110,8 @@ class LineNode(Node):
         self.pub_stop.publish(StopLineState(detected=s.detected, confirmed=s.confirmed, angle=float(s.angle)))
         self.pub.publish(LineState(offset=float(r.offset), line_found=r.line_found,
                                    event=r.event.value, raw_event=r.raw_event.value,
-                                   angle=float(r.angle), angle_valid=r.angle_valid))
+                                   angle=float(r.angle), angle_valid=r.angle_valid,
+                                   branch_left=r.branch_left, branch_right=r.branch_right))
 
 
 def main(args=None):

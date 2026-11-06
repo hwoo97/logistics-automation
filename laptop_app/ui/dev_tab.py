@@ -58,6 +58,12 @@ class DevTab(ttk.Frame):
             s = tk.Scale(pt, from_=0, to=180, orient="horizontal", variable=var, length=170, resolution=1)
             s.grid(row=r, column=1, columnspan=2, sticky="w")
             s.bind("<ButtonRelease-1>", lambda e: self._send_servo())
+        cal = ttk.Frame(pt)
+        cal.grid(row=3, column=0, columnspan=3, sticky="w", padx=2, pady=(2, 4))
+        ttk.Button(cal, text="정면 자동 맞춤", command=lambda: self._calibrate("AUTO")).pack(side="left")
+        ttk.Button(cal, text="초기화", width=6, command=lambda: self._calibrate("RESET")).pack(side="left", padx=2)
+        self.cal_lbl = ttk.Label(pt, text="곧은 라인 위에 똑바로 놓고 누름 (line_node 필요)", foreground="gray")
+        self.cal_lbl.grid(row=4, column=0, columnspan=3, sticky="w", padx=2)
 
         wh = ttk.LabelFrame(f, text="바퀴 듀티  (/dev/wheels, -1~1)")
         wh.pack(fill="x")
@@ -71,6 +77,31 @@ class DevTab(ttk.Frame):
             row=4, column=0, columnspan=2, sticky="w")
         ttk.Button(wh, text="모두 0", command=self._zero_wheels).grid(row=4, column=2, sticky="e", padx=2)
         return f
+
+    def _calibrate(self, action: str):
+        """카메라 팬 정면 자동 맞춤 (DEV CAL AUTO) — Pi가 팬을 돌리며 라인이 수직인 각도를 찾아 저장. RESET = 저장값 지움."""
+        if self.send("DEV", "CAL", action):
+            self.cal_lbl.config(text="정면 맞추는 중…" if action == "AUTO" else "초기화 중…", foreground="#f57c00")
+
+    def _on_cal(self, state: str, detail: str):
+        if state == "RUNNING":
+            pan, _, angle = detail.partition(" ")
+            text, color = f"맞추는 중: 팬 {pan}°  라인 {angle}°", "#f57c00"
+        elif state == "DONE":
+            text, color = f"정면 = 팬 {detail}° (Pi에 저장, 모든 자세에 적용)", "#2e7d32"
+            try:
+                self.pan.set(float(detail))
+            except ValueError:
+                pass
+        elif state == "RESET":
+            text, color = f"초기화 — params 각도 사용 (LINE 팬 {detail}°)", "black"
+        elif state == "CANCELLED":
+            text, color = "정면 맞춤 취소 (다른 자세 명령)", "black"
+        else:
+            text, color = f"실패: {detail}", "#d32f2f"
+        self.cal_lbl.config(text=text, foreground=color)
+        if state != "RUNNING":
+            self.log("SYS", f"정면 맞춤 {text}")
 
     def _send_servo(self):
         self.send("DEV", "SERVO", float(round(self.pan.get())), float(round(self.tilt.get())))
@@ -203,6 +234,8 @@ class DevTab(ttk.Frame):
                   command=lambda: self.send("DEV", "DRIVE", "STOP")).pack(side="left", padx=4)
         tk.Button(run, text="↩ U턴", bg="#1565c0", fg="white", font=("맑은 고딕", 10, "bold"), width=8,
                   command=self._start_uturn).pack(side="left")
+        tk.Button(run, text="⚑ 도착 시험", bg="#6a1b9a", fg="white", font=("맑은 고딕", 10, "bold"), width=10,
+                  command=self._start_arrive).pack(side="left", padx=(4, 0))
         self.drive_lbl = ttk.Label(run, text="대기", width=18)
         self.drive_lbl.pack(side="left", padx=4)
         self.speed = tk.DoubleVar(value=self.tuning["speed"])
@@ -282,6 +315,34 @@ class DevTab(ttk.Frame):
             return
         self.drive_lbl.config(text="U턴 준비…", foreground="#f57c00")
         self.after(500, lambda: self.send("DEV", "DRIVE", "UTURN"))
+
+    def _start_arrive(self):
+        """도착 시험 (agv.launch.py 필요) — 목적지 색으로 정지선까지 → 카메라를 표지판 쪽으로 → 직진 → 초음파 약 18cm 정지
+        → 표지판 분류 → 결과(EVENT ARRIVED)를 알리고 카메라를 내림. 이어서 U턴 버튼으로 유턴 시험."""
+        if not self.send("DEV", "POSE", "LINE"):
+            return
+        self.drive_lbl.config(text="도착 시험 준비…", foreground="#f57c00")
+        self.after(500, lambda: self.send("DEV", "DRIVE", "ARRIVE"))
+
+    ARRIVE_STATES = {"NAVIGATE": "도착 시험: 정지선까지 주행", "APPROACH": "도착 시험: 표지판 쪽으로 접근",
+                     "CHECK_SIGN": "도착 시험: 표지판 확인"}
+
+    def show_arrive_state(self, state: str):
+        """도착 시험 중 mission_node 상태를 주행 표시줄에 (STATUS)."""
+        if getattr(self, "arriving", False) and state in self.ARRIVE_STATES:
+            self.drive_lbl.config(text=self.ARRIVE_STATES[state], foreground="#6a1b9a")
+
+    def show_arrive_event(self, event: str, detail: str):
+        """도착 시험 시작·결과·취소·오류 (EVENT ARRIVE_TEST / ARRIVED / CANCELLED, ERROR)."""
+        if event == "ARRIVE_TEST":
+            self.arriving = True
+            return
+        if not getattr(self, "arriving", False) or event not in ("ARRIVED", "CANCELLED", "ERROR"):
+            return
+        self.arriving = False
+        text = {"ARRIVED": f"도착: {detail}", "CANCELLED": "도착 시험 취소"}.get(event, f"오류: {detail}")
+        self.drive_lbl.config(text=text[:24], foreground="#d32f2f" if event == "ERROR" else "black")
+        self.log("SYS", f"도착 시험 {text}")
 
     def _send_speed(self):
         self.send("DEV", "SPEED", float(round(self.speed.get(), 2)))
@@ -378,6 +439,8 @@ class DevTab(ttk.Frame):
                            "REJECTED": (f"거부: {r['result']}", "#d32f2f")}.get(r["state"], (r["state"], "black"))
             self.drive_lbl.config(text=text, foreground=color)
             self.log("SYS", f"라인 주행 {text}")
+        elif kind == "CAL":
+            self._on_cal(r["state"], r["detail"])
         elif kind == "NODES":
             self.nodes.delete(0, "end")
             for n in r["nodes"]:

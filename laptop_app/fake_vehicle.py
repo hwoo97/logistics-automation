@@ -209,15 +209,29 @@ class FakeVehicle:
             elif rest[0] == "UTURN":
                 self.drive_uturn_end = now + 3.0
                 self.send(format_dev("DRIVE", "UTURN"))
+            elif rest[0] == "ARRIVE":                              # 도착 시험 — mission_node 흉내 (목적지 색 = DEV TARGET)
+                target = getattr(self, "drive_target", "NONE")
+                self.color = target.lower() if target != "NONE" else "NONE"
+                self.feed("TEST_ARRIVE", now)
             else:
                 self.drive_end = self.drive_uturn_end = None
                 self.send(format_dev("DRIVE", "DONE", "STOPPED"))
+                self.feed("CANCEL", now)
         elif sub == "WATCH":
             keys = WATCH_KEYS if rest[0] == "ALL" else (rest[0],)
             for k in keys:
                 (self.watches.add if rest[1] == "ON" else self.watches.discard)(k)
         elif sub == "NODES":
             self.send(format_dev("NODES", FAKE_NODES))
+        elif sub == "CAL":                                       # 정면 자동 맞춤 흉내 — 70° → 66°
+            if rest[0] == "AUTO":
+                for pan, angle in ((70.0, 84.0), (73.0, 79.5), (66.5, 89.2), (66.0, 90.0)):
+                    self.send(format_dev("CAL", "RUNNING", pan, angle))
+                self.pan = 66.0
+                self.send(format_dev("CAL", "DONE", 66.0))
+            else:
+                self.pan = 70.0
+                self.send(format_dev("CAL", "RESET", 70.0))
 
     # ── 주기 작업 ─────────────────────────────────────────
 

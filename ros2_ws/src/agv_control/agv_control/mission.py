@@ -2,8 +2,11 @@
 
 입력은 Event, 출력은 Action 목록. ROS·시간 함수에 의존하지 않는다 (시각은 이벤트의 now로 받음).
 
-지점 도착 공통: NAVIGATE(정지선까지) → APPROACH(표지판 앞까지 서행, 초음파로 멈춤) → CHECK_SIGN(카메라 올려 분류)
-  → 지점 역할 → 카메라 내리고 UTURN → NAVIGATE(유턴 뒤 첫 정지선 = 방금 지점의 정지선은 통과). 대기장소는 유턴 없이 끝.
+지점 도착 공통 (교수 변경 시나리오 2026-11-03 순서): NAVIGATE(정지선까지) → 정지선에서 카메라를 표지판 쪽으로 →
+  APPROACH(직진 서행, 초음파 약 18cm에서 멈춤) → CHECK_SIGN(분류) → 지점 역할 → 카메라 내리고 UTURN
+  → NAVIGATE(유턴 뒤 첫 정지선 = 방금 지점의 정지선은 통과). 대기장소는 유턴 없이 끝.
+도착 시험 (TEST_ARRIVE, 노트북 앱 개발자 탭): 매핑 없이 지금 목적지 색으로 NAVIGATE → 위 도착 과정 → 분류 결과를
+  EVENT ARRIVED로 알리고 카메라를 내린 뒤 IDLE (모델이 없어도 오류로 멈추지 않음). CANCEL = 진행 중 동작을 멈추고 IDLE.
 초기 설정: 출발 위치(대기장소) 표지판 확인 → 매핑에 없는 색을 하나씩 목적지 색으로 따라가 표지판을 읽어 저장 → 4색 끝나면 대기장소로.
 작업: 먼저 운반할 물품은 무작위, 한 물품을 다 옮긴 뒤 다음 물품. 1회 최대 9개(넘으면 여러 번 왕복), 상차 지점에서 1초에 1개
 싣고 그 물품 하차 지점에서 1초에 1개 내림 → 끝나면 대기장소(Start)로. (교수 변경 시나리오 2026-11-03)
@@ -33,7 +36,7 @@ class MissionConfig:
 
 @dataclass
 class Event:
-    kind: str                           # SETUP START STOP RESUME MANUAL_ON MANUAL_OFF MOVE DRIVE_DONE PHASE RANGE POSE_READY SIGN TICK
+    kind: str                           # SETUP START TEST_ARRIVE CANCEL STOP RESUME MANUAL_ON MANUAL_OFF MOVE DRIVE_DONE PHASE RANGE POSE_READY SIGN TICK
     data: dict = field(default_factory=dict)
 
 
@@ -61,6 +64,8 @@ class MissionContext:
     skip_stop_lines: int = 0                        # 다음 NAVIGATE에서 통과할 정지선
     retry: int = 0
     hits: int = 0
+    aiming: bool = False                            # 정지선에서 카메라를 표지판 쪽으로 올리는 중 (APPROACH 주행 전)
+    test: bool = False                              # 도착 시험 중
     since: float = 0.0                              # APPROACH 시작·PARKED 시작 시각
     next_tick: float = 0.0                          # 다음 상차·하차 시각
     clear_since: float | None = None                # 장애물 해제 시작 시각
@@ -115,6 +120,10 @@ class MissionStateMachine:
             return [A("CMD_VEL", **ev.data)] if self.state == State.MANUAL else []
         if k == "SETUP" and self.state == State.IDLE:
             return self._setup()
+        if k == "TEST_ARRIVE" and self.state == State.IDLE:
+            return self._test_arrive()
+        if k == "CANCEL":
+            return self._cancel()
         if k == "START" and self.state == State.IDLE:
             return self._start(int(ev.data.get("circle", 0)), int(ev.data.get("square", 0)))
         if k == "PHASE":
@@ -128,6 +137,7 @@ class MissionStateMachine:
         c = self.ctx
         c.mode, c.plan, c.done, c.total, c.cargo, c.load = Mode.NONE, [], 0, 0, Cargo.NONE, 0
         c.explore, c.skip_stop_lines, c.resume_state, c.error = None, 0, None, ""
+        c.aiming = c.test = False
 
     def _setup(self) -> list[Action]:
         """출발 위치(대기장소 표지판 앞)를 먼저 확인한 뒤 색 탐색. 이전 매핑은 지운다 (트랙이 바뀌었을 수 있음)."""
@@ -137,6 +147,21 @@ class MissionStateMachine:
         acts = [A("SAVE_MAP", track_map={}), A("DIGIT", char="0"), A("LED", state=LedState.OFF.value),
                 A("REPORT", event="SETUP_STARTED")]
         return acts + self._check_sign()
+
+    def _test_arrive(self) -> list[Action]:
+        """도착 시험 — 목적지 색은 drive_node에 이미 정한 것(DEV TARGET)을 그대로 씀."""
+        self._reset()
+        self.ctx.test = True
+        return [A("POSE", pose=Pose.LINE.value), A("REPORT", event="ARRIVE_TEST")] + self._navigate()
+
+    def _cancel(self) -> list[Action]:
+        """진행 중 동작을 멈추고 IDLE (개발자 탭 주행 정지). 비상 정지·수동은 그대로 둠."""
+        if self.state in (State.IDLE, State.MANUAL, State.ESTOP):
+            return []
+        self.state = State.IDLE
+        self._reset()
+        return [A("CANCEL_DRIVE"), A("POSE", pose=Pose.LINE.value), A("LED", state=LedState.OFF.value),
+                A("DIGIT", char="0"), A("REPORT", event="CANCELLED")]
 
     def _start(self, circle: int, square: int) -> list[Action]:
         if not self.mapped:
@@ -178,9 +203,15 @@ class MissionStateMachine:
         self.state = State.NAVIGATE
         return [A("DRIVE", command=DriveCommand.FOLLOW_TO_EVENT.value, skip=self.ctx.skip_stop_lines)]
 
+    def _aim(self) -> list[Action]:
+        """정지선에 섬 → 카메라를 표지판 쪽으로. 자세가 잡히면(POSE_READY) 표지판까지 직진 서행."""
+        self.state = State.APPROACH
+        self.ctx.aiming, self.ctx.hits, self.ctx.since = True, 0, self.now
+        return [A("POSE", pose=Pose.SIGN.value)]
+
     def _approach(self) -> list[Action]:
         self.state = State.APPROACH
-        self.ctx.hits, self.ctx.since = 0, self.now
+        self.ctx.aiming, self.ctx.hits, self.ctx.since = False, 0, self.now
         return [A("DRIVE", command=DriveCommand.APPROACH.value, skip=0)]
 
     def _check_sign(self) -> list[Action]:
@@ -206,7 +237,7 @@ class MissionStateMachine:
         if self.state == State.NAVIGATE:
             if result == "STOP_LINE":
                 self.ctx.skip_stop_lines = 0
-                return self._approach()
+                return self._aim()
             if result == "LINE_END":
                 return self._error("E_LINE", "정지선 없이 라인 끝")
             return self._error("E_LINE" if not result.startswith("E_") else result, f"주행 중단 {result}")
@@ -220,6 +251,8 @@ class MissionStateMachine:
         dist, c, cfg = d.get("distance"), self.ctx, self.cfg
         if dist is None:
             return []
+        if self.state == State.APPROACH and c.aiming:
+            return []                                       # 아직 정지선에서 카메라를 올리는 중
         if self.state == State.APPROACH:
             c.hits = c.hits + 1 if dist <= cfg.sign_distance else 0
             if c.hits >= cfg.sign_hits:
@@ -239,6 +272,8 @@ class MissionStateMachine:
         return []
 
     def _on_pose_ready(self, d: dict) -> list[Action]:
+        if self.state == State.APPROACH and self.ctx.aiming and d.get("pose") == Pose.SIGN.value:
+            return self._approach()
         if self.state == State.CHECK_SIGN and d.get("pose") == Pose.SIGN.value:
             return [A("CLASSIFY", mode="SIGN")]
         return []
@@ -248,6 +283,8 @@ class MissionStateMachine:
             return []
         c = self.ctx
         label = d.get("label", "")
+        if c.test:
+            return self._test_result(label, d.get("message", ""))
         if not label:
             if c.retry < self.cfg.sign_retry:
                 c.retry += 1
@@ -258,6 +295,17 @@ class MissionStateMachine:
         except ValueError:
             return self._error("E_SIGN", f"모르는 라벨 {label}")
         return self._arrive_setup(seen) if c.mode == Mode.SETUP else self._arrive_work(seen)
+
+    def _test_result(self, label: str, message: str) -> list[Action]:
+        """도착 시험 끝 — 분류 결과만 알리고 카메라를 내려 IDLE (유턴은 개발자 탭 U턴 버튼)."""
+        c = self.ctx
+        if not label and c.retry < self.cfg.sign_retry:
+            c.retry += 1
+            return [A("CLASSIFY", mode="SIGN")]
+        self.state = State.IDLE
+        self._reset()
+        detail = label or f"표지판 못 읽음 {message}".strip()
+        return [A("POSE", pose=Pose.LINE.value), A("REPORT", event="ARRIVED", detail=detail)]
 
     def _arrive_setup(self, seen: Target) -> list[Action]:
         c = self.ctx
@@ -372,7 +420,7 @@ class MissionStateMachine:
         if state == State.NAVIGATE:
             return [A("POSE", pose=Pose.LINE.value)] + self._navigate()
         if state == State.APPROACH:
-            return [A("POSE", pose=Pose.LINE.value)] + self._approach()
+            return self._aim()
         if state == State.CHECK_SIGN:
             return self._check_sign()
         if state in (State.LOAD, State.UNLOAD):

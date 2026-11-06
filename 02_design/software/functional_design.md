@@ -171,7 +171,7 @@ stateDiagram-v2
     [*] --> IDLE
     IDLE --> UTURN : SETUP / START 원 사각 (대기장소 표지판을 보고 서 있으므로 먼저 유턴)
     UTURN --> NAVIGATE : 라인 재인식 (유턴 뒤 첫 정지선은 통과)
-    NAVIGATE --> APPROACH : 정지선 도착
+    NAVIGATE --> APPROACH : 정지선 도착 → 카메라를 표지판 쪽으로 (자세가 잡히면 직진 서행)
     APPROACH --> CHECK_SIGN : 초음파 ≤ 표지판 앞 정지 거리
     CHECK_SIGN --> UTURN : 초기 설정 — 지점 저장, 다음 색
     CHECK_SIGN --> LOAD : 작업 — 상차 지점
@@ -197,7 +197,7 @@ stateDiagram-v2
 |------|-------------|-----------|------|
 | IDLE | 모터 정지, LED OFF, 7세그먼트 0, 팬틸트 LINE | `SETUP` 또는 `START 원 사각` 수신 | UTURN (출발 위치 = 대기장소, 표지판 방향) |
 | NAVIGATE | 팬틸트 LINE, `/drive/target` = 목적지 색, `/drive FOLLOW_TO_EVENT` | 이벤트 수신 | 아래 6절 |
-| APPROACH | `/drive APPROACH`(서행, **라인 이벤트 무시** — 방금 멈춘 정지선 위를 지나가므로) | 초음파 ≤ 표지판 앞 정지 거리 / 시간 초과 | CHECK_SIGN / ERROR(`E_APPROACH`) |
+| APPROACH | 정지선에서 **팬틸트 SIGN**(카메라를 표지판 쪽으로) → 자세 안정 후 `/drive APPROACH`(**직진** 서행, 라인·이벤트 무시 — 카메라가 위를 봄, 방금 멈춘 정지선 위를 지나감). 순서는 교수 변경 시나리오(2026-11-03) "정지선 → 카메라 → 전진 → 약 18cm 정지" (2026-11-06 변경) | 초음파 ≤ 표지판 앞 정지 거리 / 시간 초과 | CHECK_SIGN / ERROR(`E_APPROACH`) |
 | CHECK_SIGN | 정지, 팬틸트 SIGN, 자세 안정 후 `/vision/classify SIGN` | 표지판 확정 | 모드별 (아래) / 미인식 → ERROR(`E_SIGN`) |
 | LOAD | 정지, 1초에 1개씩 `load` += 1 → 7세그먼트 표시, 첫 1개에 LED(물품 색) 켬 | `load` = 이번 적재량(최대 9) | 팬틸트 LINE → UTURN, 목적지 = 그 모양 하차 지점 |
 | UNLOAD | 정지, 1초에 1개씩 `load` −= 1, `done` += 1 → 7세그먼트 표시 | `load` = 0 → LED 끔 | 팬틸트 LINE → UTURN, 목적지 = 남은 모양 있으면 WORK, 없으면 PARK |
@@ -226,7 +226,9 @@ stateDiagram-v2
 FOLLOW_TO_EVENT ─► 이벤트?
    ├ CORNER_LEFT / CORNER_RIGHT ─► 정지 → 같은 방향 90° 회전 → FOLLOW 재개
    ├ 목적지 색 스티커 ─► 감속 → 정지·좌우 확정 → 왼쪽만 좌회전 / 오른쪽만 우회전 / 양쪽 직진 → FOLLOW 재개 (drive_node가 처리, 2026-11-02)
-   ├ STOP_LINE ─► skip_stop_lines > 0 이면 1 줄이고 통과 / 아니면 정지 → APPROACH → CHECK_SIGN
+   │     한쪽 스티커라도 그쪽에 라인 갈래(line_node branch_left/right)가 안 보이면 직진 (2026-11-06 실차: 직진·좌회전
+   │     갈래뿐인 곳에서 스티커가 오른쪽 → 오른쪽으로 돌다 왔던 라인을 잡아 유턴처럼 됨)
+   ├ STOP_LINE ─► skip_stop_lines > 0 이면 1 줄이고 통과 / 아니면 정지 → 카메라 SIGN → APPROACH(직진) → CHECK_SIGN
    └ LINE_END (정지선 없이 끝) / 라인 이탈 ─► ERROR
 ```
 
@@ -234,7 +236,7 @@ FOLLOW_TO_EVENT ─► 이벤트?
 | 상황 | 문제 | 규칙 |
 |------|------|------|
 | 지점에서 유턴 후 되돌아감 | 표지판과 분기점 사이의 **그 지점 정지선**을 다시 지나며 APPROACH에 잘못 들어감 | 모든 UTURN에서 `skip_stop_lines = 1` → 다음 정지선 1개 통과 (지점마다 정지선이 하나라 항상 맞음) |
-| 정지선 → 표지판 접근 | 멈춘 정지선 위를 바로 지나감 | APPROACH 중에는 라인 이벤트 무시 |
+| 정지선 → 표지판 접근 | 멈춘 정지선 위를 바로 지나감 | APPROACH 중에는 라인 이벤트 무시 (카메라도 위를 봄) |
 | 분기점에서 직진·회전 직후 | 같은 분기점의 가로 라인을 다시 이벤트로 검출 | `drive_node`는 STRAIGHT·TURN 완료 후 라인 이벤트가 사라질 때까지(최소 0.5초) 새 이벤트 무시 |
 
 ### 분기점 판단 (색 마커 규칙, 2026-11-02 결정)
@@ -268,6 +270,7 @@ FOLLOW_TO_EVENT ─► 이벤트?
   | JUNCTION | (사용 안 함 — 2026-11-02 마커를 LINE 자세로 봄, 개발자 탭 시험용으로만 남김) | 약간 아래 |
   | SIGN | 표지판 인식 | 정면 |
 - 자세 변경 후 0.3초 안정화 대기
+- **팬 정면 자동 맞춤 (2026-11-06)**: 앱 개발자 탭 "정면 자동 맞춤"(`DEV CAL AUTO` → `/pantilt/calibrate`). 차를 곧은 라인 위에 똑바로 놓으면 LINE 틸트에서 `/line/state` 각도를 보며 팬을 돌려 라인이 수직(90° ± 1°)인 팬을 찾는다 — 카메라가 옆으로 비켜 달려도 정면이면 수직이라 오프셋이 아닌 각도로 판단. 순서: 지금 팬에서 각도 5장 중앙값 → 3° 돌려 다시 → 팬 1°당 각도 변화로 90°가 될 팬 계산(한 번에 최대 10°) → 반복(최대 8번, 30초). 결과는 `~/.agv/pantilt_cal.json`에 저장, **모든 자세의 팬 = 정면값**(틸트는 params). "초기화"(`DEV CAL RESET`)로 지우면 params 각도. 진행·결과 `/pantilt/calibration` → `DEV CAL RUNNING|DONE|FAIL|RESET|CANCELLED`. line_node가 돌고 있어야 함
 - GPIO17: 제어 없이 서보 동작 확인(2026-10-26) → 필수 아님. 드라이버는 안전하게 시작 시 LOW 출력(OE라면 출력 활성, 아니면 영향 없음)
 
 ### F3 · 모터 (`motor_node`)

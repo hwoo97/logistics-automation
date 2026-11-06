@@ -6,3 +6,5 @@ string  event           # 확정 이벤트: NONE / STOP_LINE / JUNCTION_T / JUNC
 string  raw_event       # 이번 프레임 판정 (연속 프레임 확인 전) — 검출 값 조정용
 float32 angle           # 라인 각도(도) — 90 = 똑바로, 90 미만 = 위쪽이 오른쪽으로 기움
 bool    angle_valid     # 라인을 따라간 줄이 충분해 각도를 믿을 수 있음
+bool    branch_left     # 라인과 이어진 왼쪽 갈래가 보임 (마커 앞 회전 판단 — 스티커 쪽에 갈래가 없으면 직진)
+bool    branch_right    # 오른쪽 갈래

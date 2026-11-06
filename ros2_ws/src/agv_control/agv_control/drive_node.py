@@ -77,7 +77,7 @@ class DriveNode(Node):
     def on_line(self, msg: LineState):
         with self.lock:
             line = LineInput(float(msg.offset), bool(msg.line_found), _event(msg.event), _event(msg.raw_event),
-                             float(msg.angle), bool(msg.angle_valid))
+                             float(msg.angle), bool(msg.angle_valid), bool(msg.branch_left), bool(msg.branch_right))
             detected, confirmed, when = self.stop_line
             if time.monotonic() - when <= STOP_LINE_FRESH_S:     # 오래된 정지선 판정은 쓰지 않음
                 line = merge_stop_line(line, detected, confirmed)
@@ -143,7 +143,10 @@ class DriveNode(Node):
                 return
             line, self.line = self.line, None
             markers, self.markers = self.markers, None
+            decision_no = self.ctrl.decision_no
             out = self.ctrl.step(line, 1.0 / self.rate, markers)
+            if self.ctrl.decision_no != decision_no:
+                self.get_logger().info(f"마커 판단: {self.ctrl.decision}")
             self.out = out
             self._publish(out.linear, out.angular)
             if out.done:
