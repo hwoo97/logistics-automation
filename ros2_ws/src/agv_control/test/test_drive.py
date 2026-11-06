@@ -782,9 +782,95 @@ def test_uturn_ends_when_line_found_again():
     for _ in range(int(DriveConfig().uturn_min_s / DT) + 1):
         d.step(GONE, DT)
     d.step(AHEAD, DT), d.step(AHEAD, DT)
+    assert not d.step(AHEAD, DT).done and d.turn_stage == "ALIGN"   # 찾음 → 맞추기 (이미 가운데)
     out = d.step(AHEAD, DT)
     assert out.done and out.result == "UTURN_DONE" and out.linear == 0 and out.angular == 0
     assert not d.active and d.phase == "FOLLOW"
+
+
+def test_uturn_without_align_ends_on_found():
+    d = uturn(uturn_align=False)
+    for _ in range(int(DriveConfig().uturn_min_s / DT) + 1):
+        d.step(GONE, DT)
+    d.step(AHEAD, DT), d.step(AHEAD, DT)
+    out = d.step(AHEAD, DT)
+    assert out.done and out.result == "UTURN_DONE"
+
+
+def at(offset):
+    return LineInput(offset, True, angle=90.0, angle_valid=True)
+
+
+def aligning(first=0.0, **cfg):
+    """유턴에서 라인을 찾아 맞추기 단계에 들어간 상태. first = 찾은 순간 라인 위치."""
+    d = uturn(**cfg)
+    for _ in range(int(DriveConfig().uturn_min_s / DT) + 1):
+        d.step(GONE, DT)
+    for _ in range(DriveConfig().turn_seen_frames - 1):
+        d.step(at(first), DT)
+    d.step(at(first), DT)
+    return d
+
+
+@pytest.mark.parametrize("offset, sign", [(0.8, -1), (-0.8, 1)])
+def test_uturn_align_turns_toward_line_at_edge(offset, sign):
+    """유턴 뒤 라인이 화면 끝(관성으로 지나침·덜 돎)에 있으면 그쪽으로 천천히 돎 — 오른쪽(+)이면 오른쪽(−)."""
+    c = DriveConfig()
+    d = aligning()
+    out = d.step(at(offset), DT)
+    assert not out.done and out.linear == 0 and out.angular * sign > 0
+    assert c.align_min <= abs(out.angular) <= c.align_max and abs(out.angular) < c.turn_speed
+
+
+def test_uturn_align_small_error_uses_min_speed():
+    c = DriveConfig()
+    d = aligning()
+    out = d.step(at(0.15), DT)
+    assert out.angular == pytest.approx(-c.align_min)
+
+
+def test_uturn_align_ends_after_centered_frames():
+    """화면 끝 → 가운데로 들어오면 멈추고, 멈춘 채 연속 맞으면 끝."""
+    d = aligning()
+    for off in (0.8, 0.5, 0.3):
+        assert not d.step(at(off), DT).done
+    out = d.step(at(0.05), DT)
+    assert not out.done and out.angular == 0                  # 멈춰서 확인
+    out = d.step(at(0.0), DT)
+    assert out.done and out.result == "UTURN_DONE" and out.angular == 0
+
+
+def test_uturn_align_uses_center_offset():
+    """기준 위치(앱 "라인 기준")에 맞춤 — 기준이 −0.1이면 0.0은 아직 오른쪽."""
+    d = aligning(center_offset=-0.1, align_tol=0.05)
+    assert d.step(at(0.0), DT).angular < 0
+    d.step(at(-0.1), DT)
+    assert d.step(at(-0.1), DT).done
+
+
+def test_uturn_align_overshoot_turns_back():
+    """맞추다 지나쳐 반대쪽으로 가면 되돌아 돎."""
+    d = aligning()
+    assert d.step(at(0.5), DT).angular < 0
+    assert d.step(at(-0.5), DT).angular > 0
+
+
+def test_uturn_align_line_lost_turns_to_last_side():
+    d = aligning()
+    d.step(at(0.9), DT)
+    out = d.step(GONE, DT)
+    assert out.angular == pytest.approx(-DriveConfig().align_min)
+
+
+def test_uturn_align_timeout_still_done():
+    """못 맞춰도 시간이 지나면 끝 (라인은 찾았으므로 UTURN_DONE)."""
+    d = aligning()
+    out = None
+    for _ in range(int(DriveConfig().align_timeout_s / DT) + 2):
+        out = d.step(at(0.8), DT)
+        if out.done:
+            break
+    assert out.done and out.result == "UTURN_DONE" and out.angular == 0
 
 
 def test_uturn_t_bar_is_not_the_line():

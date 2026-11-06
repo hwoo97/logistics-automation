@@ -147,6 +147,15 @@ drive_node:
     # 유턴 — 앱 "제자리 회전" 세기를 함께 씀
     uturn_min_s: 1.5            # 시작 후 이 시간은 새 라인으로 인정 안 함 — 실제 회전 속도에 맞춰 90°보다 조금 더 도는 시간으로
     uturn_timeout_s: 8.0        # 이 시간 안에 라인을 못 찾으면 정지·E_TURN
+    # 유턴 후 맞추기 — 라인을 찾은 뒤 천천히 돌려 라인을 화면 기준 위치(앱 "라인 기준")에 맞추고 끝냄
+    #   (빠르게 돌다 멈추면 관성·영상 지연으로 라인이 화면 끝에 남아 다음 출발에서 놓침)
+    uturn_align: true           # false = 찾자마자 끝 (이전 방식)
+    align_tol: 0.1              # 기준 위치에서 이만큼 안이면 맞음
+    align_frames: 2             # 멈춘 채 이만큼 연속 맞으면 끝
+    align_gain: 1.0             # 회전 = 오차 × gain (아래 범위로 자름)
+    align_min: 0.3              # 최소 회전 세기 — 안 돌면 올림
+    align_max: 0.45             # 최대 회전 세기 — 다시 지나치면 내림
+    align_timeout_s: 3.0        # 못 맞춰도 이 시간 뒤 끝 (UTURN_DONE)
 
 classifier_node:
   ros__parameters:

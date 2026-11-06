@@ -70,6 +70,14 @@ class DriveConfig:
     turn_settle_s: float = 1.0      # 회전 후 이 시간은 정지선·코너·라인 끝을 무시 (분기점 가로선 재검출 방지)
     uturn_min_s: float = 1.5        # 유턴 시작 후 이 시간은 새 라인으로 인정 안 함 (정지선·옆 갈래에서 멈추지 않게)
     uturn_timeout_s: float = 8.0    # 이 시간 안에 라인을 못 찾으면 정지·E_TURN
+    # 유턴 후 맞추기 (2026-11-06 실차: 빠르게 돌다 멈춰 라인이 화면 끝에 남음 → 다음 출발에서 라인을 놓침)
+    uturn_align: bool = True        # 라인을 찾은 뒤 천천히 돌려 라인을 기준 위치에 맞추고 끝냄 (false = 찾자마자 끝)
+    align_tol: float = 0.1          # 기준 위치(center_offset)에서 이만큼 안이면 맞음
+    align_frames: int = 2           # 멈춘 채 이만큼 연속 맞으면 끝
+    align_gain: float = 1.0         # 회전 = 오차 × gain, 아래 범위로 자름
+    align_min: float = 0.3          # 최소 회전 세기 — 이보다 약하면 모터가 안 돎
+    align_max: float = 0.45         # 최대 회전 세기 — 빠르면 다시 지나침
+    align_timeout_s: float = 3.0    # 이 시간 안에 못 맞추면 그대로 끝 (UTURN_DONE)
     approach_speed: float = 0.45    # 표지판 접근 속도 (TT 모터 시동 문턱 이상)
     pass_clear_frames: int = 8      # 정지선 통과: 판정이 이만큼 연속 사라지면 지나간 것으로 봄
 
@@ -426,6 +434,37 @@ class DriveController:
         self.turn_dir, self.turn_stage, self.turn_t, self.turn_frames = (1 if left else -1), "FORWARD", 0.0, 0
         return self.last
 
+    def _finish_uturn(self) -> DriveOutput:
+        self.command = None
+        self._clear_phases()
+        return DriveOutput(0.0, 0.0, True, "UTURN_DONE")
+
+    def _step_align(self, line: LineInput | None) -> DriveOutput:
+        """유턴 후 맞추기 — 라인 오프셋을 기준 위치로 천천히 돌려 맞추고, 멈춘 채 연속 맞으면 끝.
+        지나쳐서 반대쪽에 있으면 되돌아 돎. 라인이 안 보이면 마지막으로 본 쪽으로 돎."""
+        c = self.cfg
+        if self.turn_t >= c.align_timeout_s:
+            return self._finish_uturn()
+        if line is None:
+            return self.last
+        if line.line_found:
+            self.turn_offset = line.offset
+            err = line.offset - c.center_offset
+            if abs(err) <= c.align_tol:
+                self.turn_frames += 1
+                if self.turn_frames >= c.align_frames:
+                    return self._finish_uturn()
+                self.last = DriveOutput(0.0, 0.0)                # 멈춘 채 확인
+                return self.last
+            self.turn_frames = 0
+            w = _clip(c.align_gain * abs(err), c.align_max)
+            self.last = DriveOutput(0.0, round(-(1 if err > 0 else -1) * max(c.align_min, w), 3))   # 오른쪽(+)이면 오른쪽으로
+            return self.last
+        self.turn_frames = 0
+        side = 1 if self.turn_offset is None else (-1 if self.turn_offset - c.center_offset > 0 else 1)
+        self.last = DriveOutput(0.0, round(side * c.align_min, 3))
+        return self.last
+
     def _line_ahead(self, line: LineInput) -> bool:
         """회전을 끝내도 되는 라인 — 기준 위치 근처에 세로에 가깝게. line_found만 보면 기존 라인·T자 가로선에서 바로 끝남."""
         c = self.cfg
@@ -435,7 +474,7 @@ class DriveController:
     def _step_turn(self, line: LineInput | None, dt: float) -> DriveOutput:
         """전진 → 제자리 회전 → 기존 라인이 벗어난 뒤 새 라인이 보이면 끝. 회전 각도는 재지 않음.
         마커 회전은 turn_blind_s 동안 라인을 보지 않고 돌기만 한 뒤(BLIND) 바로 새 라인을 찾는다(SEEK).
-        유턴은 전진 없이 같은 방식으로 돌고(라인 무시 없음), 라인을 찾으면 멈춰서 끝낸다."""
+        유턴은 전진 없이 같은 방식으로 돌고(라인 무시 없음), 라인을 찾으면 천천히 돌려 기준 위치에 맞춘 뒤(ALIGN) 끝낸다."""
         c = self.cfg
         uturn = self.command == DriveCommand.UTURN
         self.turn_t += dt
@@ -451,6 +490,8 @@ class DriveController:
                 return self.last
             self.turn_stage, self.turn_t, self.turn_frames = "SEEK", 0.0, 0   # 기존 라인은 벗어났다고 봄, 시간 제한은 여기부터
             return self.last
+        if self.turn_stage == "ALIGN":
+            return self._step_align(line)
         if self.turn_t >= (c.uturn_timeout_s if uturn else c.turn_timeout_s):
             self.command = None
             self._clear_phases()
@@ -470,11 +511,14 @@ class DriveController:
             self.turn_stage, self.turn_frames = "SEEK", 0
         min_s = c.uturn_min_s if uturn else c.turn_min_s
         self.turn_frames = self.turn_frames + 1 if ahead and self.turn_t >= min_s else 0
+        if line.line_found:
+            self.turn_offset = line.offset
         if self.turn_frames >= c.turn_seen_frames:
             if uturn:
-                self.command = None
-                self._clear_phases()
-                return DriveOutput(0.0, 0.0, True, "UTURN_DONE")
+                if c.uturn_align:
+                    self.turn_stage, self.turn_t, self.turn_frames = "ALIGN", 0.0, 0
+                    return self._step_align(line)
+                return self._finish_uturn()
             self.turn_dir = 0
             self.pid.reset()
             self.event_ignore = self.cooldown = c.turn_settle_s
