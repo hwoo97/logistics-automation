@@ -79,7 +79,7 @@
 | `/camera/image_raw` | sensor_msgs/Image | camera_ros → vision, bt | 15~30Hz | 카메라 영상 |
 | `/line/state` | agv_interfaces/LineState | line_node → drive_node, marker_node, bt_bridge | 영상 주기 | 라인 오프셋, 이벤트 |
 | `/stop_line/state` | agv_interfaces/StopLineState | line_node → drive_node, bt_bridge | 영상 주기 | 정지선 판정·확정·기울기 |
-| `/marker/state` | agv_interfaces/MarkerState | marker_node → drive_node, bt_bridge | 영상 주기 | 보이는 색 스티커의 색·좌우(라인 기준)·화면 높이 |
+| `/marker/state` | agv_interfaces/MarkerState | marker_node → drive_node, bt_bridge | 영상 주기 | 보이는 색 스티커의 색·위치(left/center/right — center = 앞 라인 위)·화면 높이 |
 | `/cmd_vel` | geometry_msgs/Twist | drive_node·mission(수동) → motor_node | 20Hz | 선속도 x, 각속도 z |
 | `/ultrasonic/range` | sensor_msgs/Range | ultrasonic_node → mission_node | 15Hz | 거리(m), 필터 적용 |
 | `/pantilt/pose` | std_msgs/String | mission_node → pantilt_node | 이벤트 | `LINE` / `JUNCTION` / `SIGN` |
@@ -225,7 +225,7 @@ stateDiagram-v2
 ```
 FOLLOW_TO_EVENT ─► 이벤트?
    ├ CORNER_LEFT / CORNER_RIGHT ─► 정지 → 같은 방향 90° 회전 → FOLLOW 재개
-   ├ 목적지 색 스티커 ─► 감속 → 정지·좌우 확정 → 왼쪽만 좌회전 / 오른쪽만 우회전 / 양쪽 직진 → FOLLOW 재개 (drive_node가 처리, 2026-11-02)
+   ├ 목적지 색 스티커 ─► 앞 라인 위(center)면 그대로 직진 / 갈래 위면 감속 → 정지·확정 → 왼쪽 갈래 좌회전 / 오른쪽 갈래 우회전 → FOLLOW 재개 (drive_node, 2026-11-06 라인 위 마커)
    │     한쪽 스티커라도 그쪽에 라인 갈래(line_node branch_left/right)가 안 보이면 직진 (2026-11-06 실차: 직진·좌회전
    │     갈래뿐인 곳에서 스티커가 오른쪽 → 오른쪽으로 돌다 왔던 라인을 잡아 유턴처럼 됨)
    ├ STOP_LINE ─► skip_stop_lines > 0 이면 1 줄이고 통과 / 아니면 정지 → 카메라 SIGN → APPROACH(직진) → CHECK_SIGN
@@ -239,15 +239,19 @@ FOLLOW_TO_EVENT ─► 이벤트?
 | 정지선 → 표지판 접근 | 멈춘 정지선 위를 바로 지나감 | APPROACH 중에는 라인 이벤트 무시 (카메라도 위를 봄) |
 | 분기점에서 직진·회전 직후 | 같은 분기점의 가로 라인을 다시 이벤트로 검출 | `drive_node`는 STRAIGHT·TURN 완료 후 라인 이벤트가 사라질 때까지(최소 0.5초) 새 이벤트 무시 |
 
-### 분기점 판단 (색 마커 규칙, 2026-11-02 결정)
-목적지 색 스티커의 **라인 기준 위치**가 방향을 정한다. 스티커는 분기점에 들어오는 라인의 옆에 붙인다.
+### 분기점 판단 (색 마커 규칙 — 2026-11-06 변경: 스티커를 **라인 테이프 위**에)
+스티커는 분기점에서 나가는 **각 갈래 라인 위**에 그 갈래로 갈 수 있는 목적지 색을 붙인다 (이전 2026-11-02: 들어오는 라인 옆 좌우).
+목적지 색 스티커가 **어느 라인 위**에 있는지가 방향을 정한다.
 
 | 목적지 색이 보이는 곳 | 동작 |
 |---|---|
-| 왼쪽만 | 좌회전 |
-| 오른쪽만 | 우회전 |
-| 양쪽 | 직진 (양쪽이 한 프레임에 보이면 멈추지 않음) |
+| 앞으로 이어지는 라인 위 (center — 분기점 너머 직진 라인, 들어오는 라인) | 직진 (멈추지 않음) |
+| 왼쪽 갈래 라인 위 | 좌회전 (그쪽에 갈래 라인이 안 보이면 직진) |
+| 오른쪽 갈래 라인 위 | 우회전 (그쪽에 갈래 라인이 안 보이면 직진) |
+| 양쪽 갈래 | 직진 (잘못 붙인 경우) |
 | 안 보임 | 라인을 따라 계속 주행 |
+- 판별: 스티커 바로 아래(차 쪽)로 검은 라인이 이어지면 앞 라인 위(center), 아래가 바닥이면 옆 갈래 위 → 라인 기준 좌우 (F6)
+- 라인 인식은 라인 위 색 스티커를 라인의 일부로 본다(`sticker_as_line`) — 빼면 라인에 구멍이 남
 
 - 다른 색만 보여도 오류로 보지 않는다 — 분기점을 지난 직후에도 다른 방향용 스티커가 정상적으로 보이기 때문. **스티커가 모두 떨어지면 그 자리에서 알 수 없고** T자는 `LINE_END`로 멈추며, 직진 갈래가 있는 곳은 도착 후 표지판 확인으로 잡는다
 - 직진 스티커 2장 중 1장만 떨어지면 회전으로 잘못 읽는다 → 라인을 못 찾으면 시간 제한으로 `E_LINE`. 제한 시간은 90°보다 조금 더 도는 시간으로 맞춘다 (길면 들어온 라인까지 돌아가 되돌아갈 수 있음)
@@ -309,7 +313,9 @@ FOLLOW_TO_EVENT ─► 이벤트?
 ### F6 · 색 마커 판별 (`marker_node`)
 - 마커 = 지름 약 2cm 원형 스티커. 카메라 자세는 LINE 그대로 (JUNCTION 자세로 바꾸지 않음)
 - 처리 (`agv_vision/marker.py`): 320×240 → HSV → 색별 범위 → 열림(3×3) → 연결 성분 → 스티커 조건 (면적 ≥ 30, 면적 ÷ 외접 사각형 ≥ 0.5, 가로 폭 = 높이별 예상 지름의 0.5~1.6배, 세로 ≤ 2배)
+- **위치 판별 (2026-11-06 라인 위 마커)**: 스티커 중심에서 지름 × 0.8~1.8 아래, 좌우 ± 지름 × 0.3 창이 50% 이상 검정이면 **center**(앞으로 이어지는 라인 위). 창이 화면 밖(바로 앞)이면 라인 위치에서 지름 안이면 center. 아니면 옆 갈래 위 → 좌우
 - 좌우는 **라인 기준** (카메라가 차체 중심에서 비켜 있음). 라인이 기울면 라인 각도로 스티커 높이의 라인 위치를 계산해 비교
+- 사용자 사진(2026-11-06 T자: 들어오는 라인 노랑, 직진 라인 파랑, 왼쪽 갈래 빨강·초록)에서 노랑·파랑 center, 빨강 left 확인 (라인 위치를 맞게 줬을 때). 초록은 사진에서 반사로 S 약 40이라 안 잡힘 → 카메라 영상으로 확인 필요
 - HSV 범위 (2026-11-02 책상 위 실제 스티커 사진, 트랙에서 다시 확인): 빨강 H168~10·S≥125·V≥125, 노랑 H24~38·S≥120·V≥120, 초록 H60~85·S≥90·V≥70 (가장 약함), 파랑 H100~116·S≥120·V≥90 → `params.yaml`
 - 출력 `/marker/state`: 색, 좌우, 화면 높이 — 높이는 거리 대신 쓰고, 앱 "MARKER" 측정값으로 확인
 - 판단은 `drive_node` (`DriveController`, 목적지 색이 정해졌을 때만):

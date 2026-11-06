@@ -18,7 +18,9 @@
                 마커 앞에 멈춰 확인할 때 drive가 씀 — 스티커 쪽에 갈래가 없으면 회전하지 않고 직진 (2026-11-06)
   갈림길(분기점)은 판정하지 않는다 → 색 마커 인식이 맡음 (2026-10-30 결정). T자·옆 갈래 모양은 NONE,
   마커를 놓쳐 T자에서 라인이 끊기면 LINE_END로 멈춘다.
-검정 = 줄의 바닥 밝기보다 충분히 어둡고 + 색이 없음(S가 낮음) → 반사·그림자에 강하고, 빨강·파랑 마커는 라인으로 잡히지 않음.
+검정 = 줄의 바닥 밝기보다 충분히 어둡고 + 색이 없음(S가 낮음) → 반사·그림자에 강함.
+색 스티커(채도 높음)는 sticker_as_line이면 라인에 더한다 — 마커를 라인 테이프 위에 붙이므로(2026-11-06) 빼면 라인에 구멍이 남.
+  라인과 떨어진 색 물체는 따로 떨어진 작은 덩어리라 라인으로 골라지지 않음.
 같은 이벤트가 confirm_frames번 연속일 때만 확정(EventConfirmer).
 """
 from dataclasses import dataclass
@@ -54,6 +56,9 @@ class LineConfig:
     branch_top_ratio: float = 0.2       # 옆 갈래는 화면 위에서 이 비율 아래부터 끝까지 봄 (마커 앞에 섰을 때 분기점이 관심 영역보다 멂)
     branch_reach: float = 0.2           # 라인 중심에서 화면 폭의 이 비율 이상 옆으로 뻗어야 갈래
     branch_rows: int = 3                # 그런 줄이 이만큼 있어야 갈래
+    sticker_as_line: bool = True        # 라인 위 색 스티커를 라인으로 (마커를 테이프 위에 붙임, 2026-11-06)
+    sticker_s_min: int = 100            # 색 스티커 = 채도 이상·밝기 이상 (실측 스티커 S 140~250, 바닥 S 30 이하)
+    sticker_v_min: int = 80
 
 
 @dataclass
@@ -104,6 +109,16 @@ def black_mask(bgr: np.ndarray, cfg: LineConfig, spread: int = 0) -> np.ndarray:
     return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
 
+def line_mask(bgr: np.ndarray, cfg: LineConfig, spread: int = 0) -> np.ndarray:
+    """라인 마스크 = 검정 (+ sticker_as_line이면 채도 높은 색 스티커)."""
+    mask = black_mask(bgr, cfg, spread)
+    if cfg.sticker_as_line:
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        color = ((hsv[..., 1] >= cfg.sticker_s_min) & (hsv[..., 2] >= cfg.sticker_v_min)).astype(np.uint8) * 255
+        mask |= cv2.morphologyEx(color, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    return mask
+
+
 def _black_columns(band: np.ndarray, fill: float) -> np.ndarray:
     """띠에서 검은 열 여부 (열마다 검은 비율 ≥ fill)."""
     return (band > 0).mean(axis=0) >= fill
@@ -146,7 +161,7 @@ class LineDetector:
         c = self.cfg
         img = cv2.resize(bgr, (c.width, c.height), interpolation=cv2.INTER_AREA)
         roi = img[int(c.height * (1 - c.roi_ratio)):, :]
-        mask = black_mask(roi, c)
+        mask = line_mask(roi, c)
         h = mask.shape[0]
         _, labels = cv2.connectedComponents(mask, connectivity=8)
         line_id = self.select_line(labels, h)
@@ -171,7 +186,7 @@ class LineDetector:
         가는 줄에서만 중심을 옮김 — 분기점의 넓은 줄에서는 직전 중심 유지."""
         c = self.cfg
         region = img[int(c.height * c.branch_top_ratio):, :]
-        mask = black_mask(region, c, spread=c.max_line_px)
+        mask = line_mask(region, c, spread=c.max_line_px)
         _, labels = cv2.connectedComponents(mask, connectivity=8)
         ref = (self.offset + 1) * c.width / 2
         bottom = labels[-max(3, mask.shape[0] // 10):, max(0, int(ref - c.max_line_px)): int(ref + c.max_line_px) + 1]

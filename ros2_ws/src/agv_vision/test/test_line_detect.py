@@ -416,3 +416,40 @@ def test_colored_marker_beside_line_is_not_branch():
     cv2.circle(img, (60, 106), 9, (40, 40, 220), -1)
     r = run(img)
     assert not r.branch_left and not r.branch_right
+
+
+# ── 라인 위 스티커 (2026-11-06 마커를 테이프 위에) — 라인에 구멍이 나지 않음 ──
+
+def _sticker_on_line(img, x, y, color_bgr=(40, 40, 220)):
+    import cv2
+    cv2.circle(img, (x, y), 9, color_bgr, -1)
+    return img
+
+
+@pytest.mark.parametrize("y", [200, 225, 235])
+def test_sticker_on_line_keeps_line(y):
+    img = floor()
+    vline(img, 160)
+    _sticker_on_line(img, 160, y)
+    r = run(img)
+    assert r.line_found and abs(r.offset) < 0.05 and r.event == LineEvent.NONE
+
+
+def test_sticker_on_line_without_option_makes_hole():
+    """옵션을 끄면(이전 방식) 가까운 띠를 덮는 색이 라인을 끊음 — 옵션이 필요한 이유."""
+    img = floor()
+    vline(img, 160)
+    img[213:240, 140:181] = (40, 40, 220)                    # 가까운 띠를 덮는 색
+    det = LineDetector(LineConfig(sticker_as_line=False))
+    assert not det.process(img).line_found
+    assert run(img).line_found
+
+
+def test_sticker_on_branch_keeps_branch():
+    img = floor()
+    vline(img, 160)
+    hline(img, 0, 170, BRANCH_Y)
+    _sticker_on_line(img, 60, 106)
+    _sticker_on_line(img, 100, 106, (60, 160, 40))
+    r = run(img)
+    assert r.branch_left and not r.branch_right

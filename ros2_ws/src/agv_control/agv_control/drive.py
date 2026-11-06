@@ -9,8 +9,10 @@ UTURN(제자리에서 돌아 왔던 라인을 다시 찾음), APPROACH(정지선
 회전 = −turn_scale × (PID(오프셋 − center_offset) + kh × 각도 오차/45°)
   center_offset: 카메라가 차체 중심에서 비켜 달려 있을 때 라인이 와야 할 화면 위치 (−0.1 = 가운데에서 10% 왼쪽)
   turn_scale   : 회전 세기 — 노트북 앱에서 주행 중 조정 (흔들리면 낮춤)
-마커 (목적지 색이 정해졌을 때만, 2026-11-02): 목적지 색 스티커가 왼쪽만 = 좌회전, 오른쪽만 = 우회전, 양쪽 = 직진.
-  보이면 감속 → 화면 아래쪽까지 오면 정지해 여러 프레임으로 좌우 확정 → 전진 → 제자리 회전.
+마커 (목적지 색이 정해졌을 때만): 스티커는 라인 테이프 위 (2026-11-06 변경). marker_node가 center(앞으로 이어지는
+  라인 위)·left·right(옆 갈래 위)로 알려 줌. 목적지 색이 center = 직진(멈추지 않음), 왼쪽 갈래만 = 좌회전,
+  오른쪽 갈래만 = 우회전, 양쪽 갈래 = 직진(잘못 붙인 경우).
+  갈래 스티커가 보이면 감속 → 화면 아래쪽까지 오면 정지해 여러 프레임으로 확정 → 전진 → 제자리 회전.
   한쪽 스티커라도 그쪽에 라인 갈래(line_node branch_left/right)가 안 보이면 회전하지 않고 직진 (2026-11-06 실차:
   직진·좌회전 갈래뿐인 곳에서 스티커가 오른쪽 → 오른쪽으로 돌다 왔던 라인을 잡아 유턴이 됨).
   회전은 각도가 아니라 라인으로 끝낸다 (엔코더 없음): 기존 라인이 벗어난 뒤, 새 라인이 기준 근처에 세로에 가깝게 보이면 끝.
@@ -355,22 +357,28 @@ class DriveController:
         self.decision, self.decision_no = text, self.decision_no + 1
 
     def _target_sides(self, markers: list[MarkerInput], min_y: float) -> set[str]:
-        """min_y보다 아래(가까이)에 보이는 목적지 색 스티커의 좌우."""
+        """min_y보다 아래(가까이)에 보이는 목적지 색 스티커의 위치 (left / center / right)."""
         return {m.side for m in markers if m.color == self.target and m.y >= min_y}
 
     def _on_markers(self, markers: list[MarkerInput]) -> bool:
-        """주행 중 마커 상태. 목적지 색이 보이면 감속, 판단 위치까지 오면 정지해서 확인 (True), 양쪽이면 멈추지 않고 직진."""
+        """주행 중 마커 상태. 갈래 위 목적지 색이 보이면 감속, 판단 위치까지 오면 정지해서 확인 (True).
+        앞 라인 위(center)거나 양쪽 갈래면 멈추지 않고 직진."""
         c = self.cfg
         if self.target is None or self.marker_ignore > 0.0:
             self.marker_near = False
             return False
-        self.marker_near = bool(self._target_sides(markers, c.marker_slow_y))
+        self.marker_near = bool(self._target_sides(markers, c.marker_slow_y) & {"left", "right"})
         sides = self._target_sides(markers, c.marker_stop_y)
-        if len(sides) == 2:
+        turn = sides & {"left", "right"}
+        if len(turn) == 2:
             self._resume_after_marker()
-            self._decide("STRAIGHT (양쪽 스티커)")
+            self._decide("STRAIGHT (양쪽 갈래 스티커)")
             return False
-        if sides:
+        if not turn and "center" in sides:
+            self._resume_after_marker()
+            self._decide("STRAIGHT (앞 라인 위 마커)")
+            return False
+        if turn:
             self.check_t, self.check_counts, self.branch_counts = 0.0, [0, 0, 0], [0, 0, 0]
             self.marker_near = False
             self.last = DriveOutput(0.0, 0.0)

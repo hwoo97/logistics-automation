@@ -818,3 +818,42 @@ def test_approach_cancel():
     d.step(AHEAD, DT)
     out = d.cancel()
     assert out.done and out.result == "STOPPED" and out.linear == 0
+
+
+# ── 라인 위 마커 (2026-11-06): center = 직진, 갈래 위 = 회전 ──
+
+def test_center_marker_goes_straight_without_stopping():
+    c = DriveConfig()
+    d = marker_drive()
+    assert d.step(AHEAD, DT, see("center", y=80.0)).linear == pytest.approx(c.speed)    # 감속도 안 함
+    out = d.step(AHEAD, DT, see("center", y=130.0))
+    assert out.linear > 0 and d.phase == "FOLLOW" and d.turn_dir == 0
+    assert d.decision == "STRAIGHT (앞 라인 위 마커)"
+    assert d.marker_ignore == pytest.approx(c.marker_ignore_s)
+
+
+def test_branch_marker_stops_and_turns_even_with_other_color_center():
+    """사진 배치: 노랑(앞 라인 위, 다른 색)과 빨강(왼쪽 갈래, 목적지) → 좌회전."""
+    d = marker_drive("red")
+    markers = see("left") + [MarkerInput("yellow", "center", 160.0)]
+    out = d.step(AHEAD, DT, markers)
+    assert out.linear == 0 and d.phase == "MARKER red"
+    check(d, "left")
+    assert d.phase == "TURN LEFT"
+
+
+def test_center_frames_during_check_mean_straight():
+    """멈춰서 보니 갈래가 아니라 앞 라인 위로 확인되면 직진."""
+    d = marker_drive()
+    d.step(AHEAD, DT, see("left"))
+    for _ in range(40):
+        d.step(branches(left=True), DT, see("center"))
+        if not d.phase.startswith("MARKER"):
+            break
+    assert d.phase == "FOLLOW" and d.turn_dir == 0
+
+
+def test_other_color_center_is_ignored():
+    d = marker_drive("red")
+    d.step(AHEAD, DT, [MarkerInput("blue", "center", 200.0)])
+    assert d.decision == "" and d.marker_ignore == 0

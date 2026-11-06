@@ -112,3 +112,65 @@ def test_stickers_do_not_become_stop_line():
         sticker(img, color, 200, 190)
     det = StopLineDetector()
     assert not any(det.process(img, 0.0).detected for _ in range(5))
+
+
+# ── 라인 위 마커 (2026-11-06): 앞으로 이어지는 라인 위 = center, 옆 갈래 위 = left/right ──
+# 사용자 사진 배치: 세로 라인 x186, 왼쪽 갈래 y60~72. 노랑 = 분기점 앞(들어오는 라인), 파랑 = 분기점 너머 직진 라인,
+# 빨강·초록 = 왼쪽 갈래 위.
+
+def junction(line_x=186, branch_y=(60, 72), side="left"):
+    img = np.full((H, W, 3), 215, np.uint8)
+    img[:, line_x - 6: line_x + 6] = 25                               # 세로 라인 (들어오는 + 직진)
+    if side == "left":
+        img[branch_y[0]:branch_y[1], 0:line_x] = 25
+    else:
+        img[branch_y[0]:branch_y[1], line_x:] = 25
+    return img
+
+
+def on_line(img, color, x, y):
+    d = 8.5 + 0.076 * y
+    cv2.circle(img, (x, y), int(d / 2), bgr(color), -1)
+    return img
+
+
+def test_photo_layout_center_and_left_branch():
+    img = junction()
+    on_line(img, "yellow", 186, 103)                                   # 분기점 앞
+    on_line(img, "blue", 186, 37)                                      # 분기점 너머 직진
+    on_line(img, "red", 113, 66)                                       # 왼쪽 갈래
+    on_line(img, "green", 140, 66)
+    found = {m.color: m.side for m in detect(img, offset=186 / 160 - 1, angle=90.0)}
+    assert found == {"yellow": "center", "blue": "center", "red": "left", "green": "left"}
+
+
+def test_right_branch_sticker_is_right():
+    img = junction(side="right")
+    on_line(img, "red", 260, 66)
+    assert [m.side for m in detect(img, offset=186 / 160 - 1)] == ["right"]
+
+
+def test_center_does_not_depend_on_line_offset():
+    """아래로 라인이 이어지는지로 판단 — /line/state 오프셋이 틀려도 center."""
+    img = junction()
+    on_line(img, "blue", 186, 37)
+    for offset in (-0.5, 0.0, 0.6):
+        assert detect(img, offset=offset)[0].side == "center"
+
+
+def test_sticker_at_bottom_uses_line_position():
+    """바로 앞(아래 검사 창이 화면 밖)이면 라인 위치와의 거리로."""
+    img = junction()
+    on_line(img, "yellow", 186, 228)
+    assert detect(img, offset=186 / 160 - 1)[0].side == "center"
+    img = np.full((H, W, 3), 215, np.uint8)
+    on_line(img, "yellow", 80, 228)
+    assert detect(img, offset=186 / 160 - 1)[0].side == "left"
+
+
+def test_sticker_beside_line_on_floor_is_side():
+    """바닥에 붙은 스티커(이전 방식)는 아래가 바닥 → 좌우."""
+    img = junction()
+    sticker(img, "red", 150, 170)
+    sticker(img, "red", 220, 170)
+    assert sorted(m.side for m in detect(img, offset=186 / 160 - 1)) == ["left", "right"]

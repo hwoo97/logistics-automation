@@ -41,6 +41,9 @@ class LineNode(Node):
             branch_top_ratio=p("branch_top_ratio", d.branch_top_ratio).value,
             branch_reach=p("branch_reach", d.branch_reach).value,
             branch_rows=p("branch_rows", d.branch_rows).value,
+            sticker_as_line=p("sticker_as_line", d.sticker_as_line).value,
+            sticker_s_min=p("sticker_s_min", d.sticker_s_min).value,
+            sticker_v_min=p("sticker_v_min", d.sticker_v_min).value,
         )
         self.enabled = p("enabled", True).value
         self.detector = LineDetector(cfg)
