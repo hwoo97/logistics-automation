@@ -58,13 +58,15 @@ class DriveConfig:
     marker_ignore_s: float = 2.0    # 직진·회전 뒤 이 시간은 마커 무시 (같은 마커 재인식 방지)
     turn_forward_s: float = 0.7     # 회전 전 전진 시간 — 카메라가 차축보다 앞을 보므로 회전 중심을 분기점 가까이
     turn_speed: float = 0.6         # 제자리 회전 세기
+    turn_blind_s: float = 2.0       # 마커 회전 시작 후 이 시간은 라인을 아예 보지 않고 돌기만 함 (기존 라인·분기점 가로선에
+                                    # 걸리지 않게, 앱 "회전 중 라인 무시"). 끝나면 바로 새 라인 찾기. 0 = 끄기(기존 방식)
     turn_min_s: float = 0.3         # 회전 시작 후 이 시간은 새 라인으로 인정 안 함
     turn_clear_frames: int = 2      # 기존 라인이 이만큼 연속 안 보이면 새 라인을 찾기 시작
     turn_jump_offset: float = 0.25  # 또는 오프셋이 도는 쪽으로 이만큼 튀면 — 광각이라 기존 라인이 나가기 전에 새 라인이 들어옴
     turn_accept_offset: float = 0.4 # 새 라인 인정: 기준 위치에서 이만큼 안쪽
     turn_accept_deg: float = 35.0   # 새 라인 인정: 90° ± 이 각도 (T자 가로선 제외)
     turn_seen_frames: int = 3       # 새 라인이 이만큼 연속 보이면 회전 끝
-    turn_timeout_s: float = 4.0     # 이 시간 안에 못 찾으면 정지·E_LINE
+    turn_timeout_s: float = 4.0     # 이 시간 안에 못 찾으면 정지·E_LINE (라인 무시 시간이 끝난 뒤부터 셈)
     turn_settle_s: float = 1.0      # 회전 후 이 시간은 정지선·코너·라인 끝을 무시 (분기점 가로선 재검출 방지)
     uturn_min_s: float = 1.5        # 유턴 시작 후 이 시간은 새 라인으로 인정 안 함 (정지선·옆 갈래에서 멈추지 않게)
     uturn_timeout_s: float = 8.0    # 이 시간 안에 라인을 못 찾으면 정지·E_TURN
@@ -161,7 +163,7 @@ class DriveController:
         self.decision = ""                  # 마지막 마커 판단 (로그용) "LEFT", "STRAIGHT (오른쪽 스티커, 오른쪽 갈래 없음)" 등
         self.decision_no = 0                # 판단할 때마다 1 증가 — drive_node가 바뀐 것을 보고 로그
         self.turn_dir = 0                   # 회전 방향 (+1 왼쪽, -1 오른쪽, 0 = 회전 중 아님)
-        self.turn_stage = ""                # FORWARD → LEAVE(기존 라인 벗어나기) → SEEK(새 라인 찾기)
+        self.turn_stage = ""                # FORWARD → BLIND(라인 안 봄) 또는 LEAVE(기존 라인 벗어나기) → SEEK(새 라인 찾기)
         self.turn_t = 0.0
         self.turn_frames = 0                # LEAVE: 라인이 안 보인 프레임 수, SEEK: 라인이 보인 프레임 수
         self.turn_offset = None             # LEAVE: 직전 라인 오프셋 (돌수록 기존 라인은 반대쪽으로 밀림)
@@ -199,7 +201,7 @@ class DriveController:
 
     def set_tune(self, key: str, value: float) -> None:
         """노트북 앱 조정 (DEV TUNE) — TURN: 회전 세기, CENTER: 라인 기준 위치, FORWARD: 회전 전 전진 시간,
-        SPIN: 제자리 회전 세기. 주행 중에도 바로 적용."""
+        SPIN: 제자리 회전 세기, BLIND: 마커 회전 중 라인 무시 시간. 주행 중에도 바로 적용."""
         if key == "TURN":
             self.cfg.turn_scale = value
         elif key == "CENTER":
@@ -208,6 +210,8 @@ class DriveController:
             self.cfg.turn_forward_s = value
         elif key == "SPIN":
             self.cfg.turn_speed = value
+        elif key == "BLIND":
+            self.cfg.turn_blind_s = value
         else:
             raise ValueError(f"모르는 조정 항목: {key}")
 
@@ -430,7 +434,8 @@ class DriveController:
 
     def _step_turn(self, line: LineInput | None, dt: float) -> DriveOutput:
         """전진 → 제자리 회전 → 기존 라인이 벗어난 뒤 새 라인이 보이면 끝. 회전 각도는 재지 않음.
-        유턴은 전진 없이 같은 방식으로 돌고, 라인을 찾으면 멈춰서 끝낸다."""
+        마커 회전은 turn_blind_s 동안 라인을 보지 않고 돌기만 한 뒤(BLIND) 바로 새 라인을 찾는다(SEEK).
+        유턴은 전진 없이 같은 방식으로 돌고(라인 무시 없음), 라인을 찾으면 멈춰서 끝낸다."""
         c = self.cfg
         uturn = self.command == DriveCommand.UTURN
         self.turn_t += dt
@@ -438,7 +443,14 @@ class DriveController:
             if self.turn_t < c.turn_forward_s:
                 self.last = DriveOutput(c.event_speed, 0.0)
                 return self.last
-            self.turn_stage, self.turn_t, self.turn_frames, self.turn_offset = "LEAVE", 0.0, 0, None
+            blind = c.turn_blind_s > 0
+            self.turn_stage, self.turn_t, self.turn_frames, self.turn_offset = ("BLIND" if blind else "LEAVE"), 0.0, 0, None
+        if self.turn_stage == "BLIND":
+            self.last = DriveOutput(0.0, round(self.turn_dir * c.turn_speed, 3))
+            if self.turn_t < c.turn_blind_s:
+                return self.last
+            self.turn_stage, self.turn_t, self.turn_frames = "SEEK", 0.0, 0   # 기존 라인은 벗어났다고 봄, 시간 제한은 여기부터
+            return self.last
         if self.turn_t >= (c.uturn_timeout_s if uturn else c.turn_timeout_s):
             self.command = None
             self._clear_phases()

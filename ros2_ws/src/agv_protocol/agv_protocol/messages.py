@@ -47,6 +47,7 @@ TUNE_RANGES = {"TURN": (0.1, 1.5),      # DEV TUNE — 회전 세기 (회전량 
                "CENTER": (-0.5, 0.5),   #            라인 기준 위치 (오프셋 목표, 음수 = 화면 왼쪽) → drive_node
                "FORWARD": (0.0, 2.0),   #            마커 회전 전 전진 시간(초)                 → drive_node
                "SPIN": (0.2, 1.0),      #            제자리 회전 세기                           → drive_node
+               "BLIND": (0.0, 3.0),     #            마커 회전 중 라인 무시 시간(초, 0 = 끄기)   → drive_node
                "CONFIRM": (1, 10),      #            정지선·코너 확정 프레임 수 (정수)          → line_node
                "LINE_END": (3, 30)}     #            라인 끝 확정 프레임 수 (정수)              → line_node
 TUNE_INT_KEYS = ("CONFIRM", "LINE_END")

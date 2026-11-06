@@ -13,7 +13,8 @@ from ui.video_view import VideoView
 CAPTURE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "captures")
 LOAD_DISTANCE, OBSTACLE_DISTANCE = 0.10, 0.15   # params.yaml 초기값 (그래프 기준선)
 # 라인 주행 조정 초기값 (params.yaml drive_node와 같게) — 바꾼 값은 config.json에 저장, 연결할 때마다 차량에 다시 보냄
-DEFAULT_TUNING = {"speed": 0.6, "turn": 1.0, "center": -0.10, "confirm": 3, "line_end": 10, "forward": 0.7, "spin": 0.6}
+DEFAULT_TUNING = {"speed": 0.6, "turn": 1.0, "center": -0.10, "confirm": 3, "line_end": 10, "forward": 0.7, "spin": 0.6,
+                  "blind": 2.0}
 
 
 class DevTab(ttk.Frame):
@@ -245,6 +246,7 @@ class DevTab(ttk.Frame):
         self.line_end = tk.DoubleVar(value=self.tuning["line_end"])
         self.forward = tk.DoubleVar(value=self.tuning["forward"])
         self.spin = tk.DoubleVar(value=self.tuning["spin"])
+        self.blind = tk.DoubleVar(value=self.tuning["blind"])
         rows = (("속도", self.speed, SPEED_RANGE, 0.05, self._send_speed),
                 ("회전 세기", self.turn, TUNE_RANGES["TURN"], 0.05, lambda: self._send_tune("TURN", self.turn)),
                 ("라인 기준", self.center, TUNE_RANGES["CENTER"], 0.01, lambda: self._send_tune("CENTER", self.center)),
@@ -253,7 +255,9 @@ class DevTab(ttk.Frame):
                  lambda: self._send_tune("LINE_END", self.line_end)),
                 ("회전 전 전진", self.forward, TUNE_RANGES["FORWARD"], 0.05,
                  lambda: self._send_tune("FORWARD", self.forward)),
-                ("제자리 회전", self.spin, TUNE_RANGES["SPIN"], 0.05, lambda: self._send_tune("SPIN", self.spin)))
+                ("제자리 회전", self.spin, TUNE_RANGES["SPIN"], 0.05, lambda: self._send_tune("SPIN", self.spin)),
+                ("회전 중 라인 무시", self.blind, TUNE_RANGES["BLIND"], 0.1,
+                 lambda: self._send_tune("BLIND", self.blind)))
         for r, (name, var, (lo, hi), step, send) in enumerate(rows, start=1):
             ttk.Label(f, text=name, width=11).grid(row=r, column=0, sticky="w", padx=(4, 0))
             s = tk.Scale(f, from_=lo, to=hi, resolution=step, orient="horizontal", variable=var, length=150,
@@ -284,7 +288,7 @@ class DevTab(ttk.Frame):
         self.tuning = {"speed": round(self.speed.get(), 2), "turn": round(self.turn.get(), 2),
                        "center": round(self.center.get(), 2), "confirm": int(self.confirm.get()),
                        "line_end": int(self.line_end.get()), "forward": round(self.forward.get(), 2),
-                       "spin": round(self.spin.get(), 2)}
+                       "spin": round(self.spin.get(), 2), "blind": round(self.blind.get(), 2)}
         self.on_tuning(self.tuning)
 
     def _send_tune(self, key, var):
@@ -298,7 +302,8 @@ class DevTab(ttk.Frame):
         """연결될 때마다 — 차량(drive_node·line_node)을 앱의 조정값에 맞춤 (Pi에서 노드를 다시 켜도 같은 값)."""
         self._send_speed()
         for key, var in (("TURN", self.turn), ("CENTER", self.center), ("CONFIRM", self.confirm),
-                         ("LINE_END", self.line_end), ("FORWARD", self.forward), ("SPIN", self.spin)):
+                         ("LINE_END", self.line_end), ("FORWARD", self.forward), ("SPIN", self.spin),
+                         ("BLIND", self.blind)):
             self._send_tune(key, var)
         self._send_target()
 

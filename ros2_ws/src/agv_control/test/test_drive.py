@@ -514,6 +514,8 @@ def test_decision_counter_increases_each_time():
 
 
 def turning(side="left", **cfg):
+    """회전 시작 직후. 기본은 라인 무시 없음(turn_blind_s=0) — 기존 라인 벗어나기(LEAVE) 방식 시험."""
+    cfg.setdefault("turn_blind_s", 0.0)
     d = marker_drive(**cfg)
     d.step(AHEAD, DT, see(side))
     check(d, side)
@@ -608,6 +610,79 @@ def test_turn_timeout_is_e_line():
     assert out.done and out.result == "E_LINE" and out.linear == 0 and out.angular == 0
     assert not d.active and not d.turn_dir
 
+
+
+BLIND = DriveConfig().turn_blind_s
+
+
+def blind_turning(side="left"):
+    return turning(side, turn_blind_s=BLIND)
+
+
+def test_blind_default_is_two_seconds():
+    assert BLIND == 2.0
+
+
+@pytest.mark.parametrize("side, sign", [("left", 1), ("right", -1)])
+def test_blind_turn_spins_without_looking(side, sign):
+    """회전 시작 후 2초는 라인이 앞에 보여도(기존 라인·옆 갈래) 끝나지 않고 그쪽으로 계속 돔."""
+    d = blind_turning(side)
+    for _ in range(int(BLIND / DT) - 2):
+        out = d.step(AHEAD, DT)
+        assert out.linear == 0 and out.angular * sign > 0
+    assert d.turn_stage == "BLIND" and d.phase.startswith("TURN")
+
+
+def test_blind_turn_ignores_line_lost_and_jumps():
+    """무시 시간 중에는 라인이 사라지거나 튀어도 단계가 바뀌지 않음."""
+    d = blind_turning()
+    for i in range(int(BLIND / DT) - 2):
+        d.step(GONE if i % 2 else LineInput(0.4, True, angle=90.0, angle_valid=True), DT)
+    assert d.turn_stage == "BLIND"
+
+
+def test_blind_turn_ends_on_line_right_after_blind():
+    """무시 시간이 끝나면 기존 라인 벗어나기 없이 바로 새 라인 찾기 — 그때 앞에 라인이 있으면 끝."""
+    d = blind_turning()
+    for _ in range(int(BLIND / DT) + 1):
+        d.step(GONE, DT)
+    assert d.turn_stage == "SEEK"
+    for _ in range(20):
+        d.step(AHEAD, DT)
+        if d.phase == "FOLLOW":
+            break
+    assert d.phase == "FOLLOW"
+
+
+def test_blind_turn_timeout_counts_after_blind():
+    c = DriveConfig()
+    d = blind_turning()
+    for _ in range(int(BLIND / DT) + 1):
+        assert not d.step(GONE, DT).done
+    out = None
+    for _ in range(int(c.turn_timeout_s / DT) - 2):
+        out = d.step(GONE, DT)
+    assert not out.done and d.phase == "TURN LEFT"           # 무시 시간 + 거의 4초 — 아직 찾는 중
+    for _ in range(4):
+        out = d.step(GONE, DT)
+        if out.done:
+            break
+    assert out.done and out.result == "E_LINE"
+
+
+def test_blind_tune_from_app():
+    d = blind_turning()
+    d.set_tune("BLIND", 0.0)                                  # 회전 중 0으로 바꾸면 다음 프레임부터 찾기
+    d.step(GONE, DT)
+    assert d.turn_stage == "SEEK"
+
+
+def test_uturn_has_no_blind():
+    """유턴은 라인 무시를 쓰지 않음 (uturn_min_s로 따로)."""
+    d = DriveController(DriveConfig())
+    d.start(DriveCommand.UTURN)
+    d.step(AHEAD, DT)
+    assert d.turn_stage == "LEAVE"
 
 def finished_turn():
     d = turning()
