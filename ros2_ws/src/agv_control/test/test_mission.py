@@ -42,7 +42,7 @@ class World:
             for act in self.sm.handle(ev):
                 self.apply(act)
             steps += 1
-            if not self.queue and self.sm.state in (State.LOAD, State.UNLOAD):
+            if not self.queue and self.sm.state in (State.LOAD, State.UNLOAD, State.CHECK_SIGN):
                 self.now += 0.5
                 self.queue.append(Event("TICK", {"now": self.now}))
         return self
@@ -348,15 +348,44 @@ def test_professor_example_red12_green5_green_first():
     assert max(peaks) == 9 and w.digits[-1] == "0"
 
 
-def test_sign_distance_is_18cm():
+def test_sign_distance_is_30cm():
+    """2026-11-06 사용자 결정: 표지판 30cm 앞에서 멈춤 (변경 시나리오 18cm에서 바꿈)."""
     m = MissionStateMachine(track_map=FULL)
     m.state = State.APPROACH
     for _ in range(3):
-        m.handle(Event("RANGE", {"distance": 0.19}))
+        m.handle(Event("RANGE", {"distance": 0.31}))
     assert m.state == State.APPROACH
     for _ in range(3):
-        m.handle(Event("RANGE", {"distance": 0.18}))
+        m.handle(Event("RANGE", {"distance": 0.30}))
     assert m.state == State.CHECK_SIGN
+
+
+def test_classify_waits_one_second_after_stop():
+    """멈추고 카메라 자세가 잡힌 뒤 1초 기다렸다 분류."""
+    m = MissionStateMachine(track_map=FULL)
+    m.state, m.ctx.aiming = State.APPROACH, False
+    for _ in range(3):
+        m.handle(Event("RANGE", {"distance": 0.25, "now": 5.0}))
+    assert m.state == State.CHECK_SIGN
+    assert m.handle(Event("POSE_READY", {"pose": "SIGN", "now": 5.1})) == []
+    assert m.handle(Event("TICK", {"now": 5.6})) == []
+    assert m.handle(Event("TICK", {"now": 6.0})) == []
+    acts = m.handle(Event("TICK", {"now": 6.1}))
+    assert [a.kind for a in acts] == ["CLASSIFY"]
+    assert m.handle(Event("TICK", {"now": 6.5})) == []          # 한 번만
+
+
+def test_classify_retry_does_not_wait_again():
+    m = MissionStateMachine(track_map=FULL)
+    m.state, m.ctx.test = State.CHECK_SIGN, True
+    acts = m.handle(Event("SIGN", {"label": "", "message": "확정 못 함", "now": 7.0}))
+    assert [a.kind for a in acts] == ["REPORT", "CLASSIFY"]
+
+
+def test_classify_without_wait_when_settle_zero():
+    m = MissionStateMachine(MissionConfig(sign_settle_s=0.0), track_map=FULL)
+    m.state = State.CHECK_SIGN
+    assert [a.kind for a in m.handle(Event("POSE_READY", {"pose": "SIGN"}))] == ["CLASSIFY"]
 
 
 # ── 도착 순서 (교수 변경 시나리오: 정지선 → 카메라 표지판 쪽 → 전진 → 18cm 정지) ──
@@ -404,11 +433,12 @@ def arrive_test(label="sign_work", **cfg):
     assert m.state == State.NAVIGATE and ("DRIVE", "FOLLOW_TO_EVENT") in kinds(acts)
     drive = [a for a in acts if a.kind == "DRIVE"][0]
     assert drive.data["skip"] == 0 and not any(a.kind == "TARGET" for a in acts)   # 목적지 색은 개발자 탭 값 그대로
-    m.handle(Event("DRIVE_DONE", {"result": "STOP_LINE"}))
-    m.handle(Event("POSE_READY", {"pose": "SIGN"}))
+    m.handle(Event("DRIVE_DONE", {"result": "STOP_LINE", "now": 0.0}))
+    m.handle(Event("POSE_READY", {"pose": "SIGN", "now": 0.5}))
     for _ in range(3):
-        m.handle(Event("RANGE", {"distance": 0.15}))
-    acts = m.handle(Event("POSE_READY", {"pose": "SIGN"}))
+        m.handle(Event("RANGE", {"distance": 0.15, "now": 2.0}))
+    assert m.handle(Event("POSE_READY", {"pose": "SIGN", "now": 2.1})) == []      # 1초 기다림
+    acts = m.handle(Event("TICK", {"now": 3.2}))
     assert [a.kind for a in acts] == ["CLASSIFY"]
     return m
 

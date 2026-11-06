@@ -40,7 +40,7 @@ class ClassifierNode(Node):
         self.label_map = parse_label_map(p("label_map", list(DEFAULT_LABEL_MAP)).value)
         self.frames = p("frames", 5).value                  # 추론할 새 영상 수
         self.need = p("need", 3).value                      # 같은 라벨이 이만큼
-        self.min_score = p("min_score", 0.8).value
+        self.min_score = p("min_score", 0.7).value
         self.timeout_s = p("timeout_s", 3.0).value
         self.classifier = None
         self.error = ""

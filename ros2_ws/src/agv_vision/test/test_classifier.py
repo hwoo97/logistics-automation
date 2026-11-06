@@ -7,14 +7,22 @@ from agv_vision.classifier import (BACKGROUND, DEFAULT_LABEL_MAP, TfliteClassifi
 
 
 def test_decide_needs_three_confident_same_labels():
-    r = [("sign_work", 0.9), ("sign_work", 0.95), ("sign_park", 0.9), ("sign_work", 0.7), ("sign_work", 0.85)]
+    r = [("sign_work", 0.9), ("sign_work", 0.95), ("sign_park", 0.9), ("sign_work", 0.6), ("sign_work", 0.85)]
     label, score = decide(r)
     assert label == "sign_work" and score == pytest.approx((0.9 + 0.95 + 0.85) / 3)
 
 
+def test_decide_default_min_score_is_0_7():
+    """2026-11-06 실차: sign_park 0.54 0.73 0.73 0.82 0.87 → 0.8 기준이면 2장뿐이라 실패, 0.7이면 확정."""
+    r = [("sign_park", s) for s in (0.54, 0.73, 0.73, 0.82, 0.87)]
+    assert decide(r, min_score=0.8) is None
+    label, _ = decide(r)
+    assert label == "sign_park"
+
+
 @pytest.mark.parametrize("results", [
     [("sign_work", 0.9)] * 2 + [("sign_park", 0.9)] * 2,       # 같은 라벨이 3개 미만
-    [("sign_work", 0.7)] * 5,                                   # 신뢰도 미달
+    [("sign_work", 0.69)] * 5,                                  # 신뢰도 미달 (0.7 미만)
     [(BACKGROUND, 0.99)] * 5,                                   # 배경은 확정하지 않음
     [],
 ])

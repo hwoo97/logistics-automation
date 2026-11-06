@@ -50,7 +50,7 @@ def preprocess(bgr: np.ndarray, size: int, dtype) -> np.ndarray:
     return x[None, ...]
 
 
-def decide(results: list[tuple[str, float]], min_score: float = 0.8, need: int = 3) -> tuple[str, float] | None:
+def decide(results: list[tuple[str, float]], min_score: float = 0.7, need: int = 3) -> tuple[str, float] | None:
     """프레임별 (라벨, 신뢰도) → 확정 (라벨, 평균 신뢰도) 또는 None."""
     good = [(label, score) for label, score in results if score >= min_score]
     if not good:

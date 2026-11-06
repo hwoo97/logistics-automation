@@ -349,7 +349,7 @@ class DevTab(ttk.Frame):
         self.after(500, lambda: self.send("DEV", "DRIVE", "UTURN"))
 
     def _start_arrive(self):
-        """도착 시험 (agv.launch.py 필요) — 목적지 색으로 정지선까지 → 카메라를 표지판 쪽으로 → 직진 → 초음파 약 18cm 정지
+        """도착 시험 (agv.launch.py 필요) — 목적지 색으로 정지선까지 → 카메라를 표지판 쪽으로 → 직진 → 초음파 약 30cm 정지 → 1초 뒤 분류
         → 표지판 분류 → 결과(EVENT ARRIVED)를 알리고 카메라를 내림. 이어서 U턴 버튼으로 유턴 시험."""
         if not self.send("DEV", "POSE", "LINE"):
             return

@@ -282,7 +282,7 @@ class FakeVehicle:
 
     def _range(self, now):
         if self.state in ("APPROACH", "CHECK_SIGN", "LOAD", "UNLOAD"):
-            return 0.18 + random.uniform(-0.005, 0.005)
+            return 0.29 + random.uniform(-0.005, 0.005)      # 표지판 앞 약 30cm
         return 1.2 + 0.05 * math.sin(now) + random.uniform(-0.01, 0.01)
 
     def _line_event(self):

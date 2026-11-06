@@ -197,7 +197,7 @@ stateDiagram-v2
 |------|-------------|-----------|------|
 | IDLE | 모터 정지, LED OFF, 7세그먼트 0, 팬틸트 LINE | `SETUP` 또는 `START 원 사각` 수신 | UTURN (출발 위치 = 대기장소, 표지판 방향) |
 | NAVIGATE | 팬틸트 LINE, `/drive/target` = 목적지 색, `/drive FOLLOW_TO_EVENT` | 이벤트 수신 | 아래 6절 |
-| APPROACH | 정지선에서 **팬틸트 SIGN**(카메라를 표지판 쪽으로) → 자세 안정 후 `/drive APPROACH`(**직진** 서행, 라인·이벤트 무시 — 카메라가 위를 봄, 방금 멈춘 정지선 위를 지나감). 순서는 교수 변경 시나리오(2026-11-03) "정지선 → 카메라 → 전진 → 약 18cm 정지" (2026-11-06 변경) | 초음파 ≤ 표지판 앞 정지 거리 / 시간 초과 | CHECK_SIGN / ERROR(`E_APPROACH`) |
+| APPROACH | 정지선에서 **팬틸트 SIGN**(카메라를 표지판 쪽으로) → 자세 안정 후 `/drive APPROACH`(**직진** 서행, 라인·이벤트 무시 — 카메라가 위를 봄, 방금 멈춘 정지선 위를 지나감). 순서는 교수 변경 시나리오(2026-11-03) "정지선 → 카메라 → 전진 → 약 18cm 정지" (2026-11-06 변경). 정지 거리는 2026-11-06 사용자 결정으로 **30cm** | 초음파 ≤ 표지판 앞 정지 거리 / 시간 초과 | CHECK_SIGN / ERROR(`E_APPROACH`) |
 | CHECK_SIGN | 정지, 팬틸트 SIGN, 자세 안정 후 `/vision/classify SIGN` | 표지판 확정 | 모드별 (아래) / 미인식 → ERROR(`E_SIGN`) |
 | LOAD | 정지, 1초에 1개씩 `load` += 1 → 7세그먼트 표시, 첫 1개에 LED(물품 색) 켬 | `load` = 이번 적재량(최대 9) | 팬틸트 LINE → UTURN, 목적지 = 그 모양 하차 지점 |
 | UNLOAD | 정지, 1초에 1개씩 `load` −= 1, `done` += 1 → 7세그먼트 표시 | `load` = 0 → LED 끔 | 팬틸트 LINE → UTURN, 목적지 = 남은 모양 있으면 WORK, 없으면 PARK |
@@ -332,7 +332,7 @@ FOLLOW_TO_EVENT ─► 이벤트?
 ### F7 · 표지판 인식 (`classifier_node`)
 - Teachable Machine 이미지 모델 → TFLite 변환 → LiteRT(`ai-edge-litert`)로 추론, 입력 224×224
 - 모델 1개: `sign.tflite`(`sign_work` / `sign_drop_a` / `sign_drop_b` / `sign_park` / `background`). 화물 모양은 앱 입력값을 쓰므로 인식하지 않음 (2026-11-02)
-- 5프레임 연속 추론 → 신뢰도 0.8 이상이 3회 이상 같은 라벨이면 확정, 아니면 1회 재시도 후 실패(`E_SIGN`, 초기 설정 중이면 `E_MAP`) — 클래스 상세는 [tm_classes.md](../ai/tm_classes.md)
+- 5프레임 연속 추론 → 신뢰도 **0.7** 이상이 3회 이상 같은 라벨이면 확정 (2026-11-06 0.8 → 0.7: 실차 0.73~0.87로 확정 못 함), 아니면 1회 재시도 후 실패(`E_SIGN`, 초기 설정 중이면 `E_MAP`) — 클래스 상세는 [tm_classes.md](../ai/tm_classes.md)
 - 카메라 영상은 분류 요청(`/vision/classify`) 중에만 구독 (2026-11-06) — 늘 받으면 주행 중 Pi 부하로 line_node 처리 프레임이 줄어 정지선을 지나쳤음
 
 ### F8 · 초음파 (`ultrasonic_node`, 해석은 `mission_node`·`drive_node`)
@@ -340,7 +340,7 @@ FOLLOW_TO_EVENT ─► 이벤트?
 - 해석은 상태에 따라 다름
   | 상태 | 해석 | 기준 (파라미터, S7·S9에서 보정) |
   |---|---|---|
-  | APPROACH | 표지판 앞 정지 거리 | 거리 ≤ 18cm 3회 연속 → 정지 (변경 시나리오 "약 18cm"). 10초 안에 도달 못 하면 `E_APPROACH` |
+  | APPROACH | 표지판 앞 정지 거리 | 거리 ≤ **30cm** 3회 연속 → 정지 (2026-11-06 사용자 결정, 변경 시나리오는 "약 18cm") → 카메라 자세가 잡힌 뒤 **1초 기다렸다** 분류(`sign_settle_s`). 10초 안에 도달 못 하면 `E_APPROACH` |
   | 라인 주행 (drive `FOLLOW_TO_EVENT`) | 정지 (2026-11-06) | **drive_node**가 거리 ≤ 18cm 3회 연속(값 없음은 건너뜀)이면 정지·결과 `OBSTACLE` (`obstacle_stop`). 마커 회전의 제자리 회전 중은 제외(회전 전 전진은 봄). 개발자 탭 ▶ 출발에서도 동작. mission NAVIGATE에서는 PAUSED_OBSTACLE → 18cm보다 먼 상태 1초면 재개 |
   | UTURN | 무시 | 표지판을 보고 선 자리에서 시작하므로 보지 않음 |
   | (mission 장애물) | 기본 꺼짐 | `obstacle_enabled: true`면 NAVIGATE·UTURN에서 한 번이라도 ≤ 18cm → PAUSED_OBSTACLE (이전 방식) |
@@ -405,7 +405,7 @@ FOLLOW_TO_EVENT ─► 이벤트?
 | marker | 4색 HSV 범위, 최소 면적, 다수결 프레임, 갈래 영역 경계(back 제외 영역 포함) | — , —, 10, — | S4, S5 |
 | layout | 정지선~표지판 거리, 표지판 앞 정지 거리, 유턴 공간 | 25cm 이상, 18cm, — | S6, S8 |
 | pantilt | LINE·JUNCTION·SIGN 각도, 서보 채널 | — | S0, S5, S6 |
-| ultrasonic | 표지판 앞 정지 거리·접근 시간 제한, (장애물 거리·해제 시간 — 기본 꺼짐) | 18cm·10초, 18cm·1초 | S6 |
+| ultrasonic | 표지판 앞 정지 거리·접근 시간 제한, (장애물 거리·해제 시간 — 기본 꺼짐) | 30cm·10초, 18cm·1초 | S6 |
 | classifier | 모델 경로, 신뢰도 기준, 재시도 | —, 0.8, 1 | S6 |
 | mission | 상차·하차 간격, 매핑 파일 | 1초, `~/.agv/track_map.json` | S7, S10 |
 | segment | 세그먼트 핀, 공통 단자 종류 | GPIO 4·27·12·13·9·10·11, — | S0 |

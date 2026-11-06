@@ -23,7 +23,8 @@ TARGETS = (Target.WORK, Target.DROP_A, Target.DROP_B, Target.PARK)
 
 @dataclass
 class MissionConfig:
-    sign_distance: float = 0.18         # 표지판 앞 정지 거리(m) — 변경 시나리오 "약 18cm"
+    sign_distance: float = 0.30         # 표지판 앞 정지 거리(m) — 2026-11-06 사용자 결정 30cm (변경 시나리오는 "약 18cm")
+    sign_settle_s: float = 1.0          # 멈추고 카메라 자세가 잡힌 뒤 이 시간 기다렸다 분류 (차체 흔들림 가라앉힘)
     sign_hits: int = 3                  # 이만큼 연속 가까우면 정지 (초음파 튐 방지)
     approach_timeout_s: float = 10.0    # 정지선에서 표지판 앞까지 시간 제한 → E_APPROACH
     item_interval_s: float = 1.0        # 상차·하차 1개 간격
@@ -68,6 +69,7 @@ class MissionContext:
     test: bool = False                              # 도착 시험 중
     since: float = 0.0                              # APPROACH 시작·PARKED 시작 시각
     next_tick: float = 0.0                          # 다음 상차·하차 시각
+    classify_at: float | None = None                # CHECK_SIGN: 이 시각에 분류 시작 (멈춘 뒤 sign_settle_s)
     clear_since: float | None = None                # 장애물 해제 시작 시각
     resume_state: State | None = None               # ESTOP·ERROR·PAUSED 뒤 돌아갈 상태
     error: str = ""
@@ -216,7 +218,7 @@ class MissionStateMachine:
 
     def _check_sign(self) -> list[Action]:
         self.state = State.CHECK_SIGN
-        self.ctx.retry = 0
+        self.ctx.retry, self.ctx.classify_at = 0, None
         return [A("POSE", pose=Pose.SIGN.value)]
 
     def _on_phase(self, phase: str) -> list[Action]:
@@ -280,6 +282,9 @@ class MissionStateMachine:
         if self.state == State.APPROACH and self.ctx.aiming and d.get("pose") == Pose.SIGN.value:
             return self._approach()
         if self.state == State.CHECK_SIGN and d.get("pose") == Pose.SIGN.value:
+            if self.cfg.sign_settle_s > 0:
+                self.ctx.classify_at = self.now + self.cfg.sign_settle_s     # TICK에서 시작
+                return []
             return [A("CLASSIFY", mode="SIGN")]
         return []
 
@@ -369,6 +374,9 @@ class MissionStateMachine:
         c, cfg = self.ctx, self.cfg
         if self.state == State.APPROACH and self.now - c.since > cfg.approach_timeout_s:
             return [A("CANCEL_DRIVE")] + self._error("E_APPROACH", "표지판 앞에 도달 못 함")
+        if self.state == State.CHECK_SIGN and c.classify_at is not None and self.now >= c.classify_at:
+            c.classify_at = None
+            return [A("CLASSIFY", mode="SIGN")]
         if self.state == State.PARKED and self.now - c.since >= cfg.parked_s:
             self.state = State.IDLE
             c.mode = Mode.NONE
