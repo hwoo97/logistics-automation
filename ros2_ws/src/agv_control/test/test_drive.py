@@ -1170,3 +1170,33 @@ def test_notes_stop_line_ignored_after_turn_once():
     d.step(stop, DT)
     d.step(stop, DT)
     assert "회전 직후" in d.note and d.note_no == 1
+
+
+def test_skip_expires_when_stop_line_never_seen():
+    """2026-11-09: 출발 때 통과할 정지선이 이미 카메라 밖이면 pass_window_s 뒤 통과 횟수 0 → 목적지 정지선에서 멈춤."""
+    d = DriveController()
+    d.start(DriveCommand.FOLLOW_TO_EVENT, skip_stop_lines=1)
+    for _ in range(int(DriveConfig().pass_window_s / DT) + 1):
+        d.step(AHEAD, DT)
+    assert d.skip_stop == 0 and "이미 지난" in d.note
+    out = d.step(STOP_RAW, DT)
+    assert out.linear == 0 and d.phase == "VERIFY STOP_LINE"
+
+
+def test_skip_does_not_expire_once_stop_line_seen():
+    """통과할 정지선을 보기 시작했으면 시간이 지나도 그 정지선을 끝까지 통과로 처리."""
+    d = DriveController()
+    d.start(DriveCommand.FOLLOW_TO_EVENT, skip_stop_lines=1)
+    for _ in range(int(DriveConfig().pass_window_s / DT) - 2):
+        d.step(AHEAD, DT)
+    for _ in range(10):
+        assert not d.step(STOP, DT).done
+    assert d.skip_stop == 1 and d.phase == "PASS STOP_LINE"
+
+
+def test_skip_window_off():
+    d = DriveController(DriveConfig(pass_window_s=0))
+    d.start(DriveCommand.FOLLOW_TO_EVENT, skip_stop_lines=1)
+    for _ in range(200):
+        d.step(AHEAD, DT)
+    assert d.skip_stop == 1

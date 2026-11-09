@@ -87,6 +87,9 @@ class DriveConfig:
     obstacle_distance: float = 0.18 # 이 거리(m) 이하가
     obstacle_hits: int = 3          # 이만큼 연속이면 정지 (값 없음은 건너뜀)
     pass_clear_frames: int = 8      # 정지선 통과: 판정이 이만큼 연속 사라지면 지나간 것으로 봄
+    pass_window_s: float = 3.0      # 출발 후 이 시간 안에 통과할 정지선이 안 보이면 이미 지난 것으로 보고 통과 횟수를 0으로
+                                    # (2026-11-09: 출발 때 정지선이 카메라 아래 사각지대에 있으면 못 보고, 남은 1이
+                                    # 목적지 정지선을 지워 지나침). 0 = 끄기
 
 
 @dataclass
@@ -189,6 +192,8 @@ class DriveController:
         self.skip_stop = 0                  # 남은 통과할 정지선 수 (유턴 뒤 1 — 방금 지점의 정지선)
         self.passing = False                # 지금 정지선 위를 지나가는 중
         self.pass_clear = 0                 # 통과 중 정지선 판정이 연속으로 없던 프레임 수
+        self.pass_t = 0.0                   # 출발 후 라인 주행 시간 (통과할 정지선을 기다린 시간)
+        self.pass_seen = False              # 통과할 정지선을 한 번이라도 봤는지
 
     @property
     def active(self) -> bool:
@@ -249,6 +254,7 @@ class DriveController:
     def start(self, command: DriveCommand, skip_stop_lines: int = 0) -> None:
         self.command = DriveCommand(command)
         self.skip_stop, self.passing, self.pass_clear = int(skip_stop_lines), False, 0
+        self.pass_t, self.pass_seen = 0.0, False
         self.pid.reset()
         self.since_line = 0.0
         self.last = DriveOutput(0.0, 0.0)
@@ -309,6 +315,7 @@ class DriveController:
         self.cooldown = max(0.0, self.cooldown - dt)
         self.marker_ignore = max(0.0, self.marker_ignore - dt)
         self.event_ignore = max(0.0, self.event_ignore - dt)
+        self.pass_t += dt
         if markers is not None and self._on_markers(markers):
             return self.last
         if line is None:                       # 이번 주기엔 새 영상 없음 → 직전 출력 유지
@@ -360,8 +367,13 @@ class DriveController:
         if self.skip_stop <= 0:
             return line
         seen = LineEvent.STOP_LINE in (line.event, line.raw_event)
+        c = self.cfg
+        if not seen and not self.pass_seen and c.pass_window_s > 0 and self.pass_t >= c.pass_window_s:
+            self.skip_stop, self.passing = 0, False             # 출발 때 이미 카메라 밖 — 목적지 정지선은 멈춰야 함
+            self._note(f"통과할 정지선이 {c.pass_window_s:g}초 동안 안 보임 → 이미 지난 것으로 봄 (다음 정지선에서 멈춤)")
+            return line
         if seen:
-            self.passing, self.pass_clear = True, 0
+            self.passing, self.pass_clear, self.pass_seen = True, 0, True
         elif self.passing:
             self.pass_clear += 1
             if self.pass_clear >= self.cfg.pass_clear_frames:
