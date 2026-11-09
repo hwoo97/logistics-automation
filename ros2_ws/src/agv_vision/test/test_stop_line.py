@@ -227,3 +227,32 @@ def test_plain_line_is_not_candidate():
     vline(img)
     r = run(img)
     assert not r.detected and not r.candidate
+
+
+# ── 놓침 의심 구간 (진단 로그, 2026-11-09) ──
+from agv_vision.stop_line import MissTracker, StopLineResult  # noqa: E402
+
+CAND = StopLineResult(False, False, 0.0, "한쪽이 짧음 (왼 6px)", True)
+DET = StopLineResult(True, False)
+NONE = StopLineResult(False, False)
+
+
+def test_miss_reported_once_when_candidates_end_without_detection():
+    m = MissTracker(3)
+    assert [m.push(CAND) for _ in range(4)] == [None] * 4
+    assert m.push(NONE) is None                                 # 한 장 빠짐은 같은 구간
+    frames, top, last = m.push(NONE)
+    assert frames == 4 and top == [("한쪽이 짧음", 4)] and last.startswith("한쪽이 짧음")
+    assert m.push(NONE) is None
+
+
+def test_no_miss_when_detected_in_episode():
+    m = MissTracker(3)
+    for r in (CAND, CAND, DET, CAND, NONE, NONE):
+        assert m.push(r) is None
+
+
+def test_short_noise_is_not_miss():
+    m = MissTracker(3)
+    for r in (CAND, CAND, NONE, NONE):
+        assert m.push(r) is None

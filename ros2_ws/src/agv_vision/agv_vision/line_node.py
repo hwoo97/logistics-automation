@@ -14,7 +14,7 @@ from std_msgs.msg import String
 from agv_bt.video_streamer import to_bgr
 from agv_interfaces.msg import LineState, StopLineState
 from agv_vision.line_detect import LineConfig, LineDetector
-from agv_vision.stop_line import StopLineConfig, StopLineDetector
+from agv_vision.stop_line import MissTracker, StopLineConfig, StopLineDetector
 
 
 class LineNode(Node):
@@ -78,7 +78,8 @@ class LineNode(Node):
                                  qos_profile_sensor_data)
         self.create_subscription(String, "/line/tune", self.on_tune, 10)
         self.add_on_set_parameters_callback(self.on_params)
-        self.diag = p("stop_diag", True).value          # 정지선 진단 로그 (1초 요약 — 판정·놓칠 뻔한 장면이 있을 때만)
+        self.diag = p("stop_diag", True).value          # 정지선 진단 로그 (1초 요약 — 정지선을 판정한 때만, 2026-11-09)
+        self.miss = MissTracker(p("stop_miss_frames", 3).value)   # 놓침 의심: 정지선 후보가 이만큼 이어졌는데 판정 0
         self._diag_reset(time.monotonic())
         self.get_logger().info(f"line_node 시작 (enabled={self.enabled}, roi={cfg.roi_ratio})")
 
@@ -87,7 +88,8 @@ class LineNode(Node):
         self.diag_reasons = Counter()
 
     def _diag(self, s):
-        """정지선 진단 — 1초마다 영상 수(=처리 속도), 판정·확정 수, 놓칠 뻔한 장면의 탈락 이유를 한 줄로."""
+        """정지선 진단 — 정지선을 판정한 1초 구간만 영상 수(=처리 속도), 판정·확정 수, 같은 구간의 탈락 이유를 한 줄로.
+        판정이 없는 구간(놓칠 뻔한 장면만 있음)은 남기지 않음 — 주행 중 로그가 계속 쌓였음 (2026-11-09 사용자)."""
         now = time.monotonic()
         self.diag_frames += 1
         self.diag_det += s.detected
@@ -95,9 +97,14 @@ class LineNode(Node):
         if s.candidate:
             self.diag_reasons[s.reason.split(" (")[0]] += 1
             self.diag_last = s.reason
+        missed = self.miss.push(s)
+        if missed:
+            frames, top, last = missed
+            why = ", ".join(f"{k} {n}" for k, n in top)
+            self.get_logger().warn(f"정지선 놓침 의심: 후보 {frames}장 이어졌는데 판정 0 — 탈락 [{why}] 예: {last}")
         if now - self.diag_t < 1.0:
             return
-        if self.diag_det or self.diag_reasons:
+        if self.diag_det:
             why = ", ".join(f"{k} {n}" for k, n in self.diag_reasons.most_common(3))
             self.get_logger().info(
                 f"정지선 진단: 영상 {self.diag_frames}장/{now - self.diag_t:.1f}초, 판정 {self.diag_det}, 확정 {self.diag_conf}"

@@ -175,3 +175,39 @@ class StopLineDetector:
                 last, gap = x, 0
             x += step
         return last
+
+
+class MissTracker:
+    """정지선 놓침 의심 구간 (진단 로그용, 2026-11-09) — 정지선 같은 두꺼운 가로 열(candidate)이 min_frames장 이상
+    이어졌다가 사라질 때까지 판정이 한 번도 없으면, 그 구간을 한 번 알린다. 한두 장 스친 잡음은 무시.
+    push()가 구간이 끝났을 때 (장 수, 이유 상위 3개, 마지막 이유)를 돌려주고, 아니면 None."""
+
+    def __init__(self, min_frames: int = 3, gap: int = 1):
+        self.min_frames, self.gap = min_frames, gap
+        self._clear()
+
+    def _clear(self):
+        self.frames, self.missing, self.detected, self.last = 0, 0, False, ""
+        self.reasons = {}
+
+    def push(self, r: StopLineResult):
+        if r.detected or r.candidate:
+            self.frames += 1
+            self.missing = 0
+            self.detected |= r.detected
+            if r.candidate:
+                key = r.reason.split(" (")[0]
+                self.reasons[key] = self.reasons.get(key, 0) + 1
+                self.last = r.reason
+            return None
+        if self.frames == 0:
+            return None
+        self.missing += 1
+        if self.missing <= self.gap:                    # 한 장 빠짐은 같은 구간
+            return None
+        out = None
+        if not self.detected and self.frames >= self.min_frames:
+            top = sorted(self.reasons.items(), key=lambda kv: -kv[1])[:3]
+            out = (self.frames, top, self.last)
+        self._clear()
+        return out
