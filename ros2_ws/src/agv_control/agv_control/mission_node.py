@@ -68,6 +68,7 @@ class MissionNode(Node):
         self.create_subscription(Command, "/mission/command", self.on_command, q10, callback_group=group)
         self.create_subscription(Range, "/ultrasonic/range", self.on_range, qos_profile_sensor_data, callback_group=group)
         self.create_subscription(String, "/pantilt/ready", self.on_ready, q10, callback_group=group)
+        self.create_subscription(String, "/mission/tune", self.on_tune, q10, callback_group=group)
         self.drive = ActionClient(self, Drive, "/drive", callback_group=group)
         self.classify = self.create_client(Classify, "/vision/classify", callback_group=group)
         self.create_timer(0.1, self.on_tick, callback_group=group)
@@ -92,6 +93,19 @@ class MissionNode(Node):
             self.feed("MOVE", linear=float(msg.linear), angular=float(msg.angular))
         else:
             self.feed(kind)                                  # SETUP STOP RESUME MANUAL_ON MANUAL_OFF
+
+    def on_tune(self, msg: String):
+        """노트북 앱 "표지판 정지 거리" (DEV TUNE SIGN, m) — 실험하며 조정 (2026-11-09). 다음 접근부터 적용."""
+        try:
+            key, value = msg.data.split()
+            if key != "SIGN":
+                raise ValueError(f"모르는 항목 {key}")
+            with self.lock:
+                self.sm.cfg.sign_distance = float(value)
+        except ValueError as e:
+            self.get_logger().warn(f"/mission/tune 형식 오류 {msg.data!r}: {e}")
+            return
+        self.get_logger().info(f"조정 표지판 정지 거리 = {float(value):.2f}m")
 
     def on_range(self, msg: Range):
         r = msg.range

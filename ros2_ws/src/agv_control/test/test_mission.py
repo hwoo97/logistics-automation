@@ -677,3 +677,16 @@ def test_reset_from_any_state_releases_estop(state):
     acts = m.handle(Event("RESET"))
     assert m.state == State.IDLE
     assert [a.data for a in acts if a.kind == "ESTOP"] == [{"on": False}]
+
+
+def test_sign_distance_tuned_at_runtime():
+    """앱 "표지판 정지 거리"(DEV TUNE SIGN → mission_node가 cfg.sign_distance를 바꿈) — 바로 다음 판단부터 적용."""
+    m = MissionStateMachine(track_map=FULL)
+    m.cfg.sign_distance = 0.18
+    m.state = State.APPROACH
+    for _ in range(3):
+        m.handle(Event("RANGE", {"distance": 0.25}))
+    assert m.state == State.APPROACH
+    for _ in range(3):
+        m.handle(Event("RANGE", {"distance": 0.18}))
+    assert m.state == State.CHECK_SIGN

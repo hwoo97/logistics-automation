@@ -16,7 +16,7 @@ from agv_bt.bridge_core import BridgeCore
 from agv_bt.rfcomm_server import RfcommServer
 from agv_bt.sysinfo import SysMonitor
 from agv_bt.video_streamer import VideoStreamer
-from agv_protocol.messages import LINE_TUNE_KEYS, format_dev
+from agv_protocol.messages import LINE_TUNE_KEYS, MISSION_TUNE_KEYS, format_dev
 
 WATCH_PERIOD_S = 0.2            # RANGE·LINE·MARKER 5Hz
 
@@ -53,6 +53,7 @@ class BtBridgeNode(Node):
         self.pub_wheels = self.create_publisher(Float32MultiArray, "/dev/wheels", QoSProfile(depth=1))
         self.pub_speed = self.create_publisher(Float32, "/drive/speed", q10)
         self.pub_tune = self.create_publisher(String, "/drive/tune", q10)
+        self.pub_mission_tune = self.create_publisher(String, "/mission/tune", q10)   # 표지판 정지 거리 (DEV TUNE SIGN)
         self.pub_line_tune = self.create_publisher(String, "/line/tune", q10)
         self.pub_target = self.create_publisher(String, "/drive/target", q10)
         self.pub_calibrate = self.create_publisher(String, "/pantilt/calibrate", q10)
@@ -131,7 +132,9 @@ class BtBridgeNode(Node):
 
     def tune(self, key, value):
         """DEV TUNE — 프레임 수는 line_node(/line/tune), 회전 세기·라인 기준은 drive_node(/drive/tune)."""
-        if key in LINE_TUNE_KEYS:
+        if key in MISSION_TUNE_KEYS:
+            self.pub_mission_tune.publish(String(data=f"{key} {float(value)}"))
+        elif key in LINE_TUNE_KEYS:
             self.pub_line_tune.publish(String(data=f"{key} {int(value)}"))
         else:
             self.pub_tune.publish(String(data=f"{key} {float(value)}"))

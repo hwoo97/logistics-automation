@@ -305,3 +305,9 @@ def test_dev_digit_reaches_io(core):
     c.on_line("DEV DIGIT 12")
     nak = io.replies("NAK")[-1]
     assert nak["command"] == "DEV DIGIT" and "0~9" in nak["reason"]
+
+
+def test_dev_tune_sign_reaches_io(core):
+    c, io = core
+    c.on_line("DEV TUNE SIGN 0.18")
+    assert ("tune", "SIGN", 0.18) in io.calls

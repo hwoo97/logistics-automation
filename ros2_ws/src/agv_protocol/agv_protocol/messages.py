@@ -52,11 +52,13 @@ TUNE_RANGES = {"TURN": (0.1, 1.5),      # DEV TUNE — 회전 세기 (회전량 
                "SPIN": (0.2, 1.0),      #            제자리 회전 세기                           → drive_node
                "BLIND": (0.0, 3.0),     #            마커 회전 중 라인 무시 시간(초, 0 = 끄기)   → drive_node
                "APPROACH": (0.2, 1.0),  #            표지판 접근 속도 (정지선 → 표지판 앞)       → drive_node
+               "SIGN": (0.05, 0.6),     #            표지판 앞 정지 거리(m, 초음파)              → mission_node (2026-11-09)
                "CONFIRM": (1, 10),      #            정지선·코너 확정 프레임 수 (정수)          → line_node
                "LINE_END": (3, 30)}     #            라인 끝 확정 프레임 수 (정수)              → line_node
 TUNE_INT_KEYS = ("CONFIRM", "LINE_END")
 CAL_ACTIONS = ("AUTO", "RESET", "SIGN")         # DEV CAL — 팬 정면 자동 맞춤 시작, 저장값 지우기, SIGN <틸트> 저장 (pantilt_node)
 LINE_TUNE_KEYS = ("CONFIRM", "LINE_END")       # 브리지가 /line/tune으로, 나머지는 /drive/tune으로
+MISSION_TUNE_KEYS = ("SIGN",)                  # 브리지가 /mission/tune으로
 
 
 @dataclass

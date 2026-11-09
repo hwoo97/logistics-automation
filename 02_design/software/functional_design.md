@@ -96,6 +96,7 @@
 | `/drive/tune` | std_msgs/String | bt_bridge → drive_node | 이벤트 | 개발자 탭 "회전 세기"(`TURN 0.6`)·"라인 기준"(`CENTER -0.1`)·"회전 전 전진"(`FORWARD 0.6`)·"제자리 회전"(`SPIN 0.6`)·"회전 중 라인 무시"(`BLIND 2.0`)·"접근 속도"(`APPROACH 0.35`), 주행 중에도 적용 |
 | `/drive/target` | std_msgs/String | bt_bridge(시험)·mission_node(예정) → drive_node | 이벤트 | 목적지 색 `red`/`green`/`blue`/`yellow`, `NONE`이면 마커를 보지 않음 |
 | `/line/tune` | std_msgs/String | bt_bridge → line_node | 이벤트 | 개발자 탭 "확인 프레임"(`CONFIRM 3`)·"라인 끝 프레임"(`LINE_END 10`), 실행 중 적용 |
+| `/mission/tune` | std_msgs/String | bt_bridge → mission_node | 이벤트 | 개발자 탭 "표지판 정지 거리"(`SIGN 0.18`, m) — 다음 초음파 판단부터 적용 (2026-11-09) |
 | `/dev/pantilt_angle` | std_msgs/Float32MultiArray | bt_bridge → pantilt_node | 이벤트 | 개발자 탭: [팬, 틸트] 각도 |
 
 ### 서비스 / 액션
@@ -344,7 +345,7 @@ FOLLOW_TO_EVENT ─► 이벤트?
 - 해석은 상태에 따라 다름
   | 상태 | 해석 | 기준 (파라미터, S7·S9에서 보정) |
   |---|---|---|
-  | APPROACH | 표지판 앞 정지 거리 | 거리 ≤ **30cm** 3회 연속 → 정지 (2026-11-06 사용자 결정, 변경 시나리오는 "약 18cm") → 카메라 자세가 잡힌 뒤 **1초 기다렸다** 분류(`sign_settle_s`). 10초 안에 도달 못 하면 `E_APPROACH` |
+  | APPROACH | 표지판 앞 정지 거리 | 거리 ≤ **30cm** 3회 연속 → 정지 (2026-11-06 사용자 결정, 변경 시나리오는 "약 18cm". 2026-11-09부터 앱 개발자 탭 "표지판 정지 거리"로 실험하며 조정 — 멈춤 지연 동안 더 가는 거리를 감안) → 카메라 자세가 잡힌 뒤 **1초 기다렸다** 분류(`sign_settle_s`). 10초 안에 도달 못 하면 `E_APPROACH` |
   | 라인 주행 (drive `FOLLOW_TO_EVENT`) | 정지 (2026-11-06) | **drive_node**가 거리 ≤ 18cm 3회 연속(값 없음은 건너뜀)이면 정지·결과 `OBSTACLE` (`obstacle_stop`). 마커 회전의 제자리 회전 중은 제외(회전 전 전진은 봄). 개발자 탭 ▶ 출발에서도 동작. mission NAVIGATE에서는 PAUSED_OBSTACLE → 18cm보다 먼 상태 1초면 재개 |
   | UTURN | 무시 | 표지판을 보고 선 자리에서 시작하므로 보지 않음 |
   | (mission 장애물) | 기본 꺼짐 | `obstacle_enabled: true`면 NAVIGATE·UTURN에서 한 번이라도 ≤ 18cm → PAUSED_OBSTACLE (이전 방식) |

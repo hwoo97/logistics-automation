@@ -221,3 +221,15 @@ def test_dev_digit_valid(ch):
 def test_dev_digit_invalid(line):
     with pytest.raises(ValueError):
         parse_command(line)
+
+
+@pytest.mark.parametrize("value", ["0.05", "0.18", "0.6"])
+def test_dev_tune_sign_valid(value):
+    """표지판 정지 거리(m) — 앱에서 실험하며 조정 (2026-11-09)."""
+    assert parse_command(f"DEV TUNE SIGN {value}").args == ["TUNE", "SIGN", value]
+
+
+@pytest.mark.parametrize("value", ["0.01", "0.7", "x"])
+def test_dev_tune_sign_out_of_range(value):
+    with pytest.raises(ValueError):
+        parse_command(f"DEV TUNE SIGN {value}")
