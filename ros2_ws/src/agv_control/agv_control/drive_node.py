@@ -54,6 +54,7 @@ class DriveNode(Node):
         self.estop = False
         self.stop_line = (False, False, 0.0)        # 마지막 정지선 판정 (있음, 확정, 받은 시각)
         self.markers: list[MarkerInput] | None = None   # 마지막 주기 이후 새로 받은 마커 상태
+        self.current_goal = None                    # 지금 실행 중인 /drive 목표 (취소 요청 대조)
 
         group = ReentrantCallbackGroup()
         self.pub = self.create_publisher(Twist, "/cmd_vel", QoSProfile(depth=1))
@@ -70,7 +71,7 @@ class DriveNode(Node):
         self.create_subscription(String, "/drive/tune", self.on_tune, QoSProfile(depth=10), callback_group=group)
         self.create_timer(1.0 / self.rate, self.on_timer, callback_group=group)
         self.server = ActionServer(self, Drive, "/drive", execute_callback=self.execute,
-                                   goal_callback=self.on_goal, cancel_callback=lambda _: CancelResponse.ACCEPT,
+                                   goal_callback=self.on_goal, cancel_callback=self.on_cancel,
                                    callback_group=group)
         self.get_logger().info(f"drive_node 시작 (speed={cfg.speed}, kp={cfg.kp}, kd={cfg.kd})")
 
@@ -172,9 +173,19 @@ class DriveNode(Node):
 
     # ── 액션 ─────────────────────────────────────────────
 
+    def on_cancel(self, goal_handle):
+        """취소 요청 즉시 정지 (2026-11-06 교수 점검 2.7: 0.2초 확인 주기 동안 타이머가 접근 속도를 계속 내보내
+        표지판 앞 정지 위치가 가까워졌음). 지금 실행 중인 목표의 취소일 때만 — 이전 목표의 늦은 취소로 새 목표를 멈추지 않게."""
+        with self.lock:
+            if goal_handle is self.current_goal and self.ctrl.active:
+                self.ctrl.cancel()
+                self._finish("STOPPED")
+        return CancelResponse.ACCEPT
+
     def execute(self, goal_handle):
         command = goal_handle.request.command
         with self.lock:
+            self.current_goal = goal_handle
             if self.ctrl.active:                      # 이전 동작은 새 명령으로 대체
                 self.ctrl.cancel()
                 self._finish("STOPPED")
@@ -187,18 +198,26 @@ class DriveNode(Node):
         feedback = Drive.Feedback()
         while not self.finished.wait(0.2):
             if goal_handle.is_cancel_requested:
-                with self.lock:
-                    self.ctrl.cancel()
-                    self._finish("STOPPED")
-                goal_handle.canceled()
-                self.get_logger().info("취소됨 → 정지")
-                return Drive.Result(success=False, result="STOPPED")
+                break
             with self.lock:
                 if self.out is not None:
                     feedback.linear, feedback.angular = float(self.out.linear), float(self.out.angular)
                 feedback.offset = self.offset
                 feedback.phase = self.ctrl.phase
             goal_handle.publish_feedback(feedback)
+        if self.result == "STOPPED" and not goal_handle.is_cancel_requested:
+            for _ in range(10):                       # on_cancel이 멈춘 직후 — 취소 상태로 바뀔 때까지 잠깐 기다림
+                time.sleep(0.02)
+                if goal_handle.is_cancel_requested:
+                    break
+        if goal_handle.is_cancel_requested:
+            with self.lock:
+                if goal_handle is self.current_goal and self.ctrl.active:   # on_cancel이 이미 멈췄으면 그대로
+                    self.ctrl.cancel()
+                    self._finish("STOPPED")
+            goal_handle.canceled()
+            self.get_logger().info("취소됨 → 정지")
+            return Drive.Result(success=False, result="STOPPED")
         result = self.result
         ok = not result.startswith("E_") and (result != "STOPPED" or command == DriveCommand.STOP.value)
         (goal_handle.succeed if ok else goal_handle.abort)()

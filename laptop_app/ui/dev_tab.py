@@ -266,7 +266,7 @@ class DevTab(ttk.Frame):
         tk.Button(run, text="▶ 출발", bg="#2e7d32", fg="white", font=("맑은 고딕", 10, "bold"), width=8,
                   command=self._start_drive).pack(side="left")
         tk.Button(run, text="■ 정지", bg="#616161", fg="white", font=("맑은 고딕", 10, "bold"), width=8,
-                  command=lambda: self.send("DEV", "DRIVE", "STOP")).pack(side="left", padx=4)
+                  command=self._stop_drive).pack(side="left", padx=4)
         tk.Button(run, text="↩ U턴", bg="#1565c0", fg="white", font=("맑은 고딕", 10, "bold"), width=8,
                   command=self._start_uturn).pack(side="left")
         tk.Button(run, text="⚑ 도착 시험", bg="#6a1b9a", fg="white", font=("맑은 고딕", 10, "bold"), width=10,
@@ -345,19 +345,39 @@ class DevTab(ttk.Frame):
             self._send_tune(key, var)
         self._send_target()
 
+    def _schedule_drive(self, action: str):
+        """카메라 자세가 잡히도록 0.5초 뒤 주행 명령 — 예약은 ■ 정지로 취소 (교수 점검 3.3)."""
+        self._cancel_scheduled()
+        self._drive_after = self.after(500, lambda: (setattr(self, "_drive_after", None),
+                                                     self.send("DEV", "DRIVE", action)))
+
+    def _cancel_scheduled(self):
+        pending = getattr(self, "_drive_after", None)
+        if pending is not None:
+            self.after_cancel(pending)
+            self._drive_after = None
+            return True
+        return False
+
+    def _stop_drive(self):
+        """■ 정지 — 아직 보내지 않은 출발 예약도 취소하고 정지 명령."""
+        if self._cancel_scheduled():
+            self.drive_lbl.config(text="출발 취소", foreground="black")
+        self.send("DEV", "DRIVE", "STOP")
+
     def _start_drive(self):
         """카메라를 LINE 자세로 내리고 0.5초 뒤(자세 안정) 출발. 멈춤: 정지 버튼·Space·정지선·코너·라인 끝."""
         if not self.send("DEV", "POSE", "LINE"):
             return
         self.drive_lbl.config(text="출발 준비…", foreground="#f57c00")
-        self.after(500, lambda: self.send("DEV", "DRIVE", "FOLLOW"))
+        self._schedule_drive("FOLLOW")
 
     def _start_uturn(self):
         """카메라를 LINE 자세로 내리고 0.5초 뒤 제자리 유턴. 라인을 다시 찾으면 멈춤 (이후 ▶ 출발로 주행)."""
         if not self.send("DEV", "POSE", "LINE"):
             return
         self.drive_lbl.config(text="U턴 준비…", foreground="#f57c00")
-        self.after(500, lambda: self.send("DEV", "DRIVE", "UTURN"))
+        self._schedule_drive("UTURN")
 
     def _start_arrive(self):
         """도착 시험 (agv.launch.py 필요) — 목적지 색으로 정지선까지 → 카메라를 표지판 쪽으로 → 직진 → 초음파 약 30cm 정지 → 1초 뒤 분류
@@ -365,7 +385,7 @@ class DevTab(ttk.Frame):
         if not self.send("DEV", "POSE", "LINE"):
             return
         self.drive_lbl.config(text="도착 시험 준비…", foreground="#f57c00")
-        self.after(500, lambda: self.send("DEV", "DRIVE", "ARRIVE"))
+        self._schedule_drive("ARRIVE")
 
     ARRIVE_STATES = {"NAVIGATE": "도착 시험: 정지선까지 주행", "APPROACH": "도착 시험: 표지판 쪽으로 접근",
                      "CHECK_SIGN": "도착 시험: 표지판 확인"}

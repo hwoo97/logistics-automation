@@ -377,7 +377,7 @@ FOLLOW_TO_EVENT ─► 이벤트?
 
 | 상황 | 감지 | 대응 | 복귀 |
 |------|------|------|------|
-| 장애물 | 라인 주행 중 초음파 ≤ 18cm 3회 연속 (drive_node `OBSTACLE`) | PAUSED_OBSTACLE (정지) | 1초간 18cm보다 멂 → 자동 재개 |
+| 장애물 | 라인 주행 중 초음파 ≤ 18cm 3회 연속 (drive_node `OBSTACLE`) | PAUSED_OBSTACLE (정지) | 1초간 18cm보다 멂(2m 안에 아무것도 없어 값 없음도 포함, 2026-11-06) → 자동 재개 |
 | 블루투스 끊김 | 1.5초 무수신 | ESTOP (모터 정지) | 재연결 + RESUME |
 | 비상 정지 | BT `STOP` | ESTOP | RESUME |
 | 표지판 미인식·불일치 | 확정 실패 또는 기대 목적지와 다름 | ERROR(`E_SIGN`) + BT 알림 | 수동으로 차량 이동 후 RESUME |

@@ -2,7 +2,7 @@
 import pytest
 
 from agv_control.mission import Event, MissionConfig, MissionStateMachine
-from agv_protocol.types import Cargo, Mode, State
+from agv_protocol.types import Cargo, Mode, State, Target
 
 TRACK = {"red": "DROP_A", "green": "DROP_B", "blue": "WORK", "yellow": "PARK"}   # 실제 배치 (차량은 모름)
 SIGN = {"WORK": "sign_work", "DROP_A": "sign_drop_a", "DROP_B": "sign_drop_b", "PARK": "sign_park"}
@@ -574,3 +574,73 @@ def test_sign_ignored_outside_check_sign():
     m = MissionStateMachine(track_map=FULL)
     m.state = State.NAVIGATE
     assert m.handle(Event("SIGN", {"label": "sign_work", "score": 0.9})) == []
+
+
+# ── 교수 점검 2026-11-06 (급한 항목) ──
+
+def test_obstacle_cleared_when_range_goes_empty():
+    """2.6: 물체를 치워 2m 안에 아무것도 없으면 초음파 값 없음(inf→None) — 멀어진 것으로 보고 1초 뒤 재개."""
+    m = MissionStateMachine(track_map=FULL)
+    m.state = State.NAVIGATE
+    m.handle(Event("DRIVE_DONE", {"result": "OBSTACLE", "now": 0.0}))
+    assert m.state == State.PAUSED_OBSTACLE
+    m.handle(Event("RANGE", {"distance": None, "now": 0.1}))
+    assert m.state == State.PAUSED_OBSTACLE
+    acts = m.handle(Event("RANGE", {"distance": None, "now": 1.2}))
+    assert m.state == State.NAVIGATE and any(a.kind == "DRIVE" for a in acts)
+
+
+def test_empty_range_ignored_outside_obstacle_pause():
+    m = MissionStateMachine(track_map=FULL)
+    m.state = State.APPROACH
+    assert m.handle(Event("RANGE", {"distance": None})) == [] and m.state == State.APPROACH
+
+
+@pytest.mark.parametrize("before", [State.ESTOP, State.ERROR])
+def test_manual_on_from_estop_or_error_releases_estop(before):
+    """2.1: 비상 정지·오류에서 수동으로 들어가면 비상 정지를 풂 (안 풀면 motor_node가 MOVE를 무시)."""
+    m = MissionStateMachine(track_map=FULL)
+    m.state = before
+    acts = m.handle(Event("MANUAL_ON"))
+    assert m.state == State.MANUAL and acts[0].kind == "ESTOP" and acts[0].data == {"on": False}
+
+
+def test_manual_on_from_idle_does_not_touch_estop():
+    m = MissionStateMachine(track_map=FULL)
+    acts = m.handle(Event("MANUAL_ON"))
+    assert not any(a.kind == "ESTOP" for a in acts)
+
+
+def test_resume_from_error_releases_estop():
+    m = MissionStateMachine(track_map=FULL)
+    m.state, m.ctx.resume_state = State.ERROR, State.NAVIGATE
+    acts = m.handle(Event("RESUME"))
+    assert acts[0].kind == "ESTOP" and acts[0].data == {"on": False}
+
+
+@pytest.mark.parametrize("state, color", [(State.NAVIGATE, "red"), (State.UTURN, "red")])
+def test_resume_republishes_route_color_in_work(state, color):
+    """2.2: 재연결 때 앱이 DEV TARGET NONE을 다시 보내도, 재개하면 지금 목적지 색을 다시 발행."""
+    m = MissionStateMachine(track_map=FULL)
+    m.ctx.mode, m.ctx.target = Mode.WORK, Target.DROP_A
+    m.state = state
+    m.handle(Event("STOP"))
+    acts = m.handle(Event("RESUME"))
+    assert [a.data["color"] for a in acts if a.kind == "TARGET"] == [color]
+
+
+def test_resume_republishes_explore_color_in_setup():
+    m = MissionStateMachine(track_map={"DROP_A": "red"})
+    m.ctx.mode, m.ctx.explore, m.state = Mode.SETUP, "blue", State.NAVIGATE
+    m.handle(Event("STOP"))
+    acts = m.handle(Event("RESUME"))
+    assert [a.data["color"] for a in acts if a.kind == "TARGET"] == ["blue"]
+
+
+def test_resume_in_arrive_test_keeps_app_color():
+    """도착 시험은 앱의 목적지 색을 쓰므로 다시 발행하지 않음."""
+    m = MissionStateMachine(track_map=FULL)
+    m.ctx.test, m.state = True, State.NAVIGATE
+    m.handle(Event("STOP"))
+    acts = m.handle(Event("RESUME"))
+    assert not any(a.kind == "TARGET" for a in acts)

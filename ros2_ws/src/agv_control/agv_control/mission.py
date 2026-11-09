@@ -117,9 +117,11 @@ class MissionStateMachine:
         if k == "RESUME":
             return self._resume() if self.state in (State.ESTOP, State.ERROR) else []
         if k == "MANUAL_ON" and self.state in (State.IDLE, State.ESTOP, State.ERROR):
+            release = self.state in (State.ESTOP, State.ERROR)   # 사람이 직접 조종 → 비상 정지 해제 (교수 점검 2.1)
             self._reset()
             self.state = State.MANUAL
-            return [A("CANCEL_DRIVE"), A("LED", state=LedState.OFF.value), A("DIGIT", char="0")]
+            acts = [A("CANCEL_DRIVE"), A("LED", state=LedState.OFF.value), A("DIGIT", char="0")]
+            return ([A("ESTOP", on=False)] if release else []) + acts
         if k == "MANUAL_OFF" and self.state == State.MANUAL:
             self.state = State.IDLE
             return [A("CMD_VEL", linear=0.0, angular=0.0)]
@@ -277,7 +279,9 @@ class MissionStateMachine:
         dist, c, cfg = d.get("distance"), self.ctx, self.cfg
         c.front_range = dist                                # 출발 방향 판단용 (값 없음도 그대로)
         if dist is None:
-            return []
+            if self.state != State.PAUSED_OBSTACLE:
+                return []
+            dist = float("inf")                             # 장애물 대기 중 값 없음 = 2m 안에 물체 없음 (교수 점검 2.6)
         if self.state == State.APPROACH and c.aiming:
             return []                                       # 아직 정지선에서 카메라를 올리는 중
         if self.state == State.APPROACH:
@@ -445,21 +449,31 @@ class MissionStateMachine:
 
     def _resume(self) -> list[Action]:
         c = self.ctx
-        was_estop = self.state == State.ESTOP
         target, c.error = c.resume_state or State.IDLE, ""
-        acts = [A("ESTOP", on=False)] if was_estop else []
+        acts = [A("ESTOP", on=False)]                       # ERROR에서도 해제 — 비상 정지가 남아 있을 수 있음 (교수 점검 2.1)
         acts += [A("LED", state=CARGO_LED[c.cargo].value if c.cargo != Cargo.NONE else LedState.OFF.value),
                  A("DIGIT", char=str(c.load))]
         return acts + [A("REPORT", event="RESUMED")] + self._reenter(target)
 
+    def _route_color(self) -> str | None:
+        """지금 따라가야 할 목적지 색 (초기 설정: 탐색 색 또는 대기장소 색, 작업: 목적지 지점 색). 도착 시험은 None(앱 값)."""
+        c = self.ctx
+        if c.mode == Mode.SETUP:
+            return c.explore or c.track_map.get(Target.PARK.value)
+        if c.mode == Mode.WORK:
+            return c.track_map.get(c.target.value)
+        return None
+
     def _reenter(self, state: State | None) -> list[Action]:
         """멈춘 동작을 다시 시작한다 (비상 정지·오류·장애물 뒤)."""
         c = self.ctx
+        color = self._route_color()                         # 재연결 때 앱이 목적지 색을 바꿨을 수 있음 (교수 점검 2.2)
+        again = [A("TARGET", color=color)] if color else []
         if state == State.UTURN:
             self.state = State.UTURN
-            return [A("POSE", pose=Pose.LINE.value), A("DRIVE", command=DriveCommand.UTURN.value, skip=0)]
+            return [A("POSE", pose=Pose.LINE.value)] + again + [A("DRIVE", command=DriveCommand.UTURN.value, skip=0)]
         if state == State.NAVIGATE:
-            return [A("POSE", pose=Pose.LINE.value)] + self._navigate()
+            return [A("POSE", pose=Pose.LINE.value)] + again + self._navigate()
         if state == State.APPROACH:
             return self._aim()
         if state == State.CHECK_SIGN:

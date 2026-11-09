@@ -77,6 +77,7 @@ class BtBridgeNode(Node):
                 self.get_logger().error("agv_interfaces 없음 — mission_node와 연결 못 함")
         self.drive_client, self._drive_goal = None, None    # 노트북 앱 "라인 주행 시작/정지" → /drive 액션
         self._drive_phase = "FOLLOW"
+        self._stop_pending = False                          # 수락 전에 DEV DRIVE STOP이 옴
         try:
             from rclpy.action import ActionClient
             from agv_interfaces.action import Drive
@@ -146,6 +147,8 @@ class BtBridgeNode(Node):
         if action == "STOP":
             if self._drive_goal is not None:
                 self._drive_goal.cancel_goal_async()            # drive_node가 정지 후 STOPPED로 끝냄
+            elif self.core.driving:                             # 목표를 보냈는데 아직 수락 전 — 수락되면 바로 취소 (교수 점검 3.3)
+                self._stop_pending = True
             else:
                 self.send(format_dev("DRIVE", "DONE", "STOPPED"))
             return
@@ -153,6 +156,7 @@ class BtBridgeNode(Node):
             self.send(format_dev("DRIVE", "REJECTED", "drive_node 없음"))
             return
         self.core.set_driving(True)                             # 응답 전에도 겹치는 명령을 막음
+        self._stop_pending = False
         self._drive_phase = "UTURN" if action == "UTURN" else "FOLLOW"
         command = "UTURN" if action == "UTURN" else "FOLLOW_TO_EVENT"
         future = self.drive_client.send_goal_async(self.Drive.Goal(command=command),
@@ -178,8 +182,12 @@ class BtBridgeNode(Node):
             self.send(format_dev("DRIVE", "REJECTED", "drive_node 거부 (비상 정지 중?)"))
             return
         self._drive_goal = handle
-        self.send(format_dev("DRIVE", "UTURN" if self._drive_phase == "UTURN" else "RUNNING"))
         handle.get_result_async().add_done_callback(self._on_drive_result)
+        if self._stop_pending:                                  # 수락 전에 정지가 왔음 → 바로 취소
+            self._stop_pending = False
+            handle.cancel_goal_async()
+            return
+        self.send(format_dev("DRIVE", "UTURN" if self._drive_phase == "UTURN" else "RUNNING"))
 
     def _on_drive_result(self, future):
         result = future.result().result
