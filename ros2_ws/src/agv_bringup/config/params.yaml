@@ -45,7 +45,7 @@ led_node:
 
 segment_node:
   ros__parameters:
-    pins: [4, 27, 12, 13, 9, 10, 11]   # a~g (pinmap.md, 2026-11-02) — 세그먼트마다 330Ω
+    pins: [4, 27, 12, 13, 7, 10, 11]   # a~g (pinmap.md, 2026-11-02) — 세그먼트마다 330Ω. e는 2026-11-09 GPIO9 → 7(헤더 26)
     common_anode: false         # 부품이 공통 애노드(공통 단자 → 3.3V)면 true
     gpio_chip: -1
 
