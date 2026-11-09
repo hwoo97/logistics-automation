@@ -749,16 +749,30 @@ def uturn(**cfg):
     return d
 
 
-def test_uturn_spins_left_in_place_without_forward():
+def test_uturn_spins_clockwise_in_place_without_forward():
+    """기본 유턴 = 시계 방향(오른쪽, 각속도 음수) — 2026-11-09 좌회전 약한 하드웨어."""
     d = uturn()
     out = d.step(AHEAD, DT)
-    assert out.linear == 0 and out.angular == pytest.approx(DriveConfig().turn_speed) and d.phase == "UTURN"
+    assert out.linear == 0 and out.angular == pytest.approx(-DriveConfig().turn_speed) and d.phase == "UTURN"
+
+
+def test_uturn_dir_left_restores_previous():
+    d = uturn(uturn_dir=1)
+    assert d.step(AHEAD, DT).angular == pytest.approx(DriveConfig().turn_speed)
 
 
 def test_uturn_follows_spin_tune():
     d = uturn()
     d.set_tune("SPIN", 0.4)
-    assert d.step(AHEAD, DT).angular == pytest.approx(0.4)
+    assert d.step(AHEAD, DT).angular == pytest.approx(-0.4)
+
+
+@pytest.mark.parametrize("udir", [-1, 1])
+def test_uturn_align_without_line_turns_uturn_way(udir):
+    """맞추기 중 라인을 한 번도 못 봤으면 유턴하던 쪽으로 계속."""
+    d = uturn(uturn_dir=udir)
+    d.turn_stage, d.turn_offset = "ALIGN", None
+    assert d.step(GONE, DT).angular == pytest.approx(udir * DriveConfig().align_min)
 
 
 def test_uturn_does_not_end_on_old_line():

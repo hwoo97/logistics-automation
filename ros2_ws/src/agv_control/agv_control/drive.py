@@ -70,6 +70,8 @@ class DriveConfig:
     turn_settle_s: float = 1.0      # 회전 후 이 시간은 정지선·코너·라인 끝을 무시 (분기점 가로선 재검출 방지)
     uturn_min_s: float = 1.5        # 유턴 시작 후 이 시간은 새 라인으로 인정 안 함 (정지선·옆 갈래에서 멈추지 않게)
     uturn_timeout_s: float = 8.0    # 이 시간 안에 라인을 못 찾으면 정지·E_TURN
+    uturn_dir: int = -1             # 유턴 방향: -1 = 오른쪽(위에서 봐서 시계 방향), +1 = 왼쪽(반시계) — 2026-11-09 사용자:
+                                    # 하드웨어가 좌회전에 약해 시계 방향으로 시험 (이전 고정값 +1)
     # 유턴 후 맞추기 (2026-11-06 실차: 빠르게 돌다 멈춰 라인이 화면 끝에 남음 → 다음 출발에서 라인을 놓침)
     uturn_align: bool = True        # 라인을 찾은 뒤 천천히 돌려 라인을 기준 위치에 맞추고 끝냄 (false = 찾자마자 끝)
     align_tol: float = 0.1          # 기준 위치(center_offset)에서 이만큼 안이면 맞음
@@ -262,8 +264,9 @@ class DriveController:
         self.cooldown = self.marker_ignore = self.event_ignore = 0.0
         self.range_hits = 0
         self.approach_t = 0.0
-        if self.command == DriveCommand.UTURN:          # 왼쪽으로 제자리 회전 — 전진 없음 (정지선 너머로 가지 않게)
-            self.turn_dir, self.turn_stage, self.turn_t, self.turn_frames, self.turn_offset = 1, "LEAVE", 0.0, 0, None
+        if self.command == DriveCommand.UTURN:          # uturn_dir 쪽으로 제자리 회전 — 전진 없음 (정지선 너머로 가지 않게)
+            udir = -1 if self.cfg.uturn_dir < 0 else 1
+            self.turn_dir, self.turn_stage, self.turn_t, self.turn_frames, self.turn_offset = udir, "LEAVE", 0.0, 0, None
 
     def _watch_range(self) -> bool:
         """초음파 정지를 볼 때 — 라인 주행 중, 제자리 회전이 아닐 때 (회전 전 전진은 봄)."""
@@ -532,7 +535,7 @@ class DriveController:
             self.last = DriveOutput(0.0, round(-(1 if err > 0 else -1) * max(c.align_min, w), 3))   # 오른쪽(+)이면 오른쪽으로
             return self.last
         self.turn_frames = 0
-        side = 1 if self.turn_offset is None else (-1 if self.turn_offset - c.center_offset > 0 else 1)
+        side = (self.turn_dir or 1) if self.turn_offset is None else (-1 if self.turn_offset - c.center_offset > 0 else 1)
         self.last = DriveOutput(0.0, round(side * c.align_min, 3))
         return self.last
 
