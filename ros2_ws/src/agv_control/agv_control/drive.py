@@ -183,7 +183,8 @@ class DriveController:
         self.check_counts = [0, 0, 0]       # 본 프레임 수, 왼쪽에 보인 수, 오른쪽에 보인 수
         self.branch_counts = [0, 0, 0]      # 확인 중 라인 프레임 수, 왼쪽 갈래 보인 수, 오른쪽 갈래 보인 수
         self.decision = ""                  # 마지막 마커 판단 (로그용) "LEFT", "STRAIGHT (오른쪽 스티커, 오른쪽 갈래 없음)" 등
-        self.decision_no = 0                # 판단할 때마다 1 증가 — drive_node가 바뀐 것을 보고 로그
+        self.decision_no = 0                # 판단할 때마다 1 증가
+        self.logs: list[tuple[str, str]] = []   # 앱 콘솔로 보낼 동작 로그 (종류 MARKER·STOP, 글) — drive_node가 비워 /agv/log로
         self.turn_dir = 0                   # 회전 방향 (+1 왼쪽, -1 오른쪽, 0 = 회전 중 아님)
         self.turn_stage = ""                # FORWARD → BLIND(라인 안 봄) 또는 LEAVE(기존 라인 벗어나기) → SEEK(새 라인 찾기)
         self.turn_t = 0.0
@@ -298,12 +299,14 @@ class DriveController:
             self.command = None
             self._clear_phases()
             self.range_hits = 0
+            self._log("STOP", f"정지: 초음파 장애물 ({self.cfg.obstacle_distance:g}m 이하 {self.cfg.obstacle_hits}번)")
             return DriveOutput(0.0, 0.0, True, "OBSTACLE")
 
         self.since_line = 0.0 if line is not None else self.since_line + dt
         if self.since_line > self.cfg.line_timeout_s:
             self.command = None
             self._clear_phases()
+            self._log("STOP", f"오류 정지: 라인 영상이 {self.cfg.line_timeout_s:g}초 동안 안 옴 (E_LINE)")
             return DriveOutput(0.0, 0.0, True, "E_LINE")
         if self.recheck_t is not None:
             return self._step_recheck(line, dt)
@@ -328,10 +331,12 @@ class DriveController:
         if self.event_ignore <= 0.0:
             if line.event == LineEvent.LINE_END and self.cfg.recheck_tries > 0:
                 self.recheck_t, self.recheck_seen = 0.0, 0     # 멈춰서 다시 봄 — 주행 중 흔들림으로 놓쳤을 수 있음
+                self._log("STOP", "라인 안 보임 → 멈추고 다시 봄")
                 self.last = DriveOutput(0.0, 0.0)
                 return self.last
             if line.event in STOP_EVENTS:
                 self.command = None
+                self._log("STOP", f"정지: {line.event.value} 확정")
                 return DriveOutput(0.0, 0.0, True, line.event.value)
             if line.raw_event in VERIFY_EVENTS and self.cooldown <= 0.0:
                 self.verify_t, self.verify_clear, self.verify_event = 0.0, 0, line.raw_event   # 일단 멈추고 확인
@@ -350,6 +355,16 @@ class DriveController:
 
     def _note(self, text: str) -> None:
         self.note, self.note_no = text, self.note_no + 1
+        self._log("STOP", f"정지선: {text}")
+
+    def _log(self, kind: str, text: str) -> None:
+        """앱 콘솔로 보낼 동작 로그 — 마커 인식·판단(MARKER), 정지·확인·오류 이유(STOP). 쌓이는 것을 막으려 50개까지."""
+        self.logs.append((kind, text))
+        del self.logs[:-50]
+
+    def take_logs(self) -> list[tuple[str, str]]:
+        out, self.logs = self.logs, []
+        return out
 
     def _note_ignored(self, line: LineInput) -> None:
         """정지선이 보였는데 멈추지 않는 이유를 한 번씩 기록 (회전 직후 무시, 오판정 뒤 쉬는 시간)."""
@@ -412,10 +427,12 @@ class DriveController:
             if self.recheck_seen >= c.recheck_frames:
                 self.recheck_t = None
                 self.pid.reset()                           # 멈춰 있던 동안의 변화율이 조향에 튀지 않게
+                self._log("STOP", "라인 다시 보임 → 다시 출발")
                 return self.last
         if self.recheck_t >= c.recheck_tries * c.recheck_s:
             self.recheck_t = None
             self.command = None
+            self._log("STOP", f"정지: 라인 끝 확정 ({c.recheck_tries * c.recheck_s:g}초 다시 봐도 라인 없음)")
             return DriveOutput(0.0, 0.0, True, LineEvent.LINE_END.value)
         return self.last
 
@@ -439,8 +456,15 @@ class DriveController:
             self.pid.reset()
         return self.last
 
-    def _decide(self, text: str) -> None:
+    def _decide(self, text: str, votes: str = "") -> None:
         self.decision, self.decision_no = text, self.decision_no + 1
+        self._log("MARKER", f"마커 판단: {text}" + (f" [{votes}]" if votes else ""))
+
+    def _marker_desc(self, markers: list[MarkerInput], min_y: float) -> str:
+        """로그용 — 목적지 색 스티커의 위치·화면 높이 ("red 왼쪽 y124")."""
+        names = {"left": "왼쪽", "right": "오른쪽", "center": "앞 라인 위"}
+        return ", ".join(f"{m.color} {names.get(m.side, m.side)} y{m.y:.0f}" for m in markers
+                         if m.color == self.target and m.y >= min_y)
 
     def _target_sides(self, markers: list[MarkerInput], min_y: float) -> set[str]:
         """min_y보다 아래(가까이)에 보이는 목적지 색 스티커의 위치 (left / center / right)."""
@@ -453,7 +477,10 @@ class DriveController:
         if self.target is None or self.marker_ignore > 0.0:
             self.marker_near = False
             return False
-        self.marker_near = bool(self._target_sides(markers, c.marker_slow_y) & {"left", "right"})
+        near = bool(self._target_sides(markers, c.marker_slow_y) & {"left", "right"})
+        if near and not self.marker_near:
+            self._log("MARKER", f"마커 인식: {self._marker_desc(markers, c.marker_slow_y)} → 감속")
+        self.marker_near = near
         sides = self._target_sides(markers, c.marker_stop_y)
         turn = sides & {"left", "right"}
         if len(turn) == 2:
@@ -467,6 +494,7 @@ class DriveController:
         if turn:
             self.check_t, self.check_counts, self.branch_counts = 0.0, [0, 0, 0], [0, 0, 0]
             self.marker_near = False
+            self._log("MARKER", f"마커 가까움: {self._marker_desc(markers, c.marker_stop_y)} → 멈추고 좌우 확인")
             self.last = DriveOutput(0.0, 0.0)
             return True
         return False
@@ -495,16 +523,18 @@ class DriveController:
         self.check_t = None
         need = counts[0] // 2 + 1
         left, right = counts[1] >= need, counts[2] >= need
+        votes = (f"스티커 왼쪽 {counts[1]}/{counts[0]} 오른쪽 {counts[2]}/{counts[0]}, "
+                 f"갈래 왼쪽 {branch[1]}/{branch[0]} 오른쪽 {branch[2]}/{branch[0]}")
         self.pid.reset()
         self._resume_after_marker()
         if left == right:
-            self._decide("STRAIGHT (양쪽 스티커)" if left else "STRAIGHT (스티커 사라짐)")
+            self._decide("STRAIGHT (양쪽 스티커)" if left else "STRAIGHT (스티커 사라짐)", votes)
             return self.last
         name = "왼쪽" if left else "오른쪽"
         if c.marker_branch_check and branch[0] > 0 and branch[1 if left else 2] < branch[0] // 2 + 1:
-            self._decide(f"STRAIGHT ({name} 스티커, {name} 갈래 없음)")
+            self._decide(f"STRAIGHT ({name} 스티커, {name} 갈래 없음)", votes)
             return self.last
-        self._decide("LEFT" if left else "RIGHT")
+        self._decide("LEFT" if left else "RIGHT", votes)
         self.turn_dir, self.turn_stage, self.turn_t, self.turn_frames = (1 if left else -1), "FORWARD", 0.0, 0
         return self.last
 
@@ -569,6 +599,9 @@ class DriveController:
         if self.turn_t >= (c.uturn_timeout_s if uturn else c.turn_timeout_s):
             self.command = None
             self._clear_phases()
+            self._log("STOP", f"오류 정지: {'유턴' if uturn else '마커 회전'} 중 "
+                              f"{c.uturn_timeout_s if uturn else c.turn_timeout_s:g}초 안에 새 라인 못 찾음"
+                              f" ({'E_TURN' if uturn else 'E_LINE'})")
             return DriveOutput(0.0, 0.0, True, "E_TURN" if uturn else "E_LINE")
         self.last = DriveOutput(0.0, round(self.turn_dir * c.turn_speed, 3))
         if line is None:

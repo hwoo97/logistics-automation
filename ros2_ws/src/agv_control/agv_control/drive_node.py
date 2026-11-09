@@ -58,6 +58,7 @@ class DriveNode(Node):
 
         group = ReentrantCallbackGroup()
         self.pub = self.create_publisher(Twist, "/cmd_vel", QoSProfile(depth=1))
+        self.pub_log = self.create_publisher(String, "/agv/log", QoSProfile(depth=50))   # 앱 콘솔 동작 로그
         self.create_subscription(LineState, "/line/state", self.on_line,
                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT), callback_group=group)
         self.create_subscription(StopLineState, "/stop_line/state", self.on_stop_line,
@@ -152,16 +153,18 @@ class DriveNode(Node):
                 return
             line, self.line = self.line, None
             markers, self.markers = self.markers, None
-            decision_no, note_no = self.ctrl.decision_no, self.ctrl.note_no
             out = self.ctrl.step(line, 1.0 / self.rate, markers)
-            if self.ctrl.decision_no != decision_no:
-                self.get_logger().info(f"마커 판단: {self.ctrl.decision}")
-            if self.ctrl.note_no != note_no:
-                self.get_logger().info(f"정지선: {self.ctrl.note}")
+            self._flush_logs()
             self.out = out
             self._publish(out.linear, out.angular)
             if out.done:
                 self._finish(out.result)
+
+    def _flush_logs(self):
+        """마커 인식·판단, 정지·오류 이유 → /agv/log ("MARKER …", "STOP …") → 브리지가 앱 콘솔로 (2026-11-09,
+        Pi 로그 대신 — 사용자 "마커 인식·방향·정지/오류 이유 위주로 ui에 로그")."""
+        for kind, text in self.ctrl.take_logs():
+            self.pub_log.publish(String(data=f"{kind} {text}"))
 
     def _publish(self, linear, angular):
         msg = Twist()
@@ -170,6 +173,8 @@ class DriveNode(Node):
 
     def _finish(self, result: str):
         self._publish(0.0, 0.0)
+        self._flush_logs()
+        self.pub_log.publish(String(data=f"STOP 주행 끝: {result}"))
         self.result = result
         self.finished.set()
 

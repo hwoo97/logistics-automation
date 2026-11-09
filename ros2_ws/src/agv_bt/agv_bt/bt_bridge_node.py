@@ -75,6 +75,7 @@ class BtBridgeNode(Node):
                 self.create_subscription(String, "/mission/report", self.on_mission_report, q10)
             except ImportError:
                 self.get_logger().error("agv_interfaces 없음 — mission_node와 연결 못 함")
+        self.create_subscription(String, "/agv/log", self.on_agv_log, QoSProfile(depth=50))   # 동작 로그 → 앱 콘솔
         self.drive_client, self._drive_goal = None, None    # 노트북 앱 "라인 주행 시작/정지" → /drive 액션
         self._drive_phase = "FOLLOW"
         self._stop_pending = False                          # 수락 전에 DEV DRIVE STOP이 옴
@@ -219,6 +220,13 @@ class BtBridgeNode(Node):
         with self.lock:
             self.core.on_mission_status(msg.state, msg.mode, msg.done, msg.total, msg.cargo, msg.load, msg.target,
                                         {k: v for k, v in track.items() if v})
+
+    def on_agv_log(self, msg):
+        """drive_node·line_node 동작 로그 "MARKER …"/"STOP …" → DEV LOG (연결돼 있을 때만, 끊긴 동안은 버림)."""
+        category, _, text = msg.data.partition(" ")
+        if self.server.connected and text:
+            with self.lock:
+                self.core.log(category, text)
 
     def on_mission_report(self, msg):
         if self.server.connected:

@@ -486,6 +486,9 @@ class DevTab(ttk.Frame):
         self.console.tag_config("RX", foreground="#2e7d32")
         self.console.tag_config("ERR", foreground="#d32f2f")
         self.console.tag_config("SYS", foreground="gray")
+        self.console.tag_config("MARKER", foreground="#6a1b9a")              # 동작 로그 (DEV LOG, 2026-11-09)
+        self.console.tag_config("STOP", foreground="#e65100")
+        self.console.tag_config("ESTOP", foreground="#d32f2f", font=("맑은 고딕", 9, "bold"))
         row = ttk.Frame(f)
         row.pack(fill="x", padx=4, pady=(0, 4))
         self.entry = ttk.Entry(row)
@@ -501,8 +504,19 @@ class DevTab(ttk.Frame):
             self.send_line(line)        # 형식 검증 없이 그대로 (차량의 NAK 확인용)
             self.entry.delete(0, "end")
 
+    LOG_LABELS = {"MARKER": "[마커]", "STOP": "[정지]", "ESTOP": "[비상정지]"}
+
     def log(self, direction: str, text: str):
         stamp = time.strftime("%H:%M:%S")
+        if direction == "RX" and text.startswith("DEV LOG "):          # 차량 동작 로그 — 종류별 색, 원문 대신 읽기 쉽게
+            _, _, category, *rest = text.split(" ")
+            msg = " ".join(rest)
+            tag = "ESTOP" if category == "ESTOP" or "오류" in msg else category if category in self.LOG_LABELS else "RX"
+            line = f"{stamp} {self.LOG_LABELS.get(category, category)} {msg}"
+            self.log_lines.append(line)
+            self.console.insert("end", f"{line}\n", tag)
+            self.console.see("end")
+            return
         self.log_lines.append(f"{stamp} {direction} {text}")
         noisy = text in ("PING", "PONG", "ACK MOVE", "ACK DEV WHEEL") or text.startswith(
             ("STATUS", "DEV RANGE", "DEV LINE", "DEV MARKER", "DEV SYS", "DEV WHEEL", "MOVE"))

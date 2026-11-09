@@ -27,6 +27,7 @@ class BridgeCore:
         self.track_map: dict = {}            # 지점 → 마커 색 (mission_node가 알려 줌)
         self.watches: set[str] = set()
         self.link_lost = False
+        self.lost_log = ""                   # 연결 끊김 비상 정지 이유 — 다시 PING이 오면(또는 재연결) 앱에 알림
         self.driving = False                 # DEV DRIVE FOLLOW로 drive_node가 주행 중 (노드가 set_driving으로 알림)
 
     # ── 상태 ─────────────────────────────────────────────
@@ -56,18 +57,31 @@ class BridgeCore:
 
     # ── 연결·하트비트 ─────────────────────────────────────
 
+    def log(self, category: str, text: str) -> None:
+        """앱 콘솔 동작 로그 (DEV LOG) — 마커 인식·판단(MARKER), 정지·오류 이유(STOP), 비상 정지 원인(ESTOP)."""
+        self.io.send(format_dev("LOG", category, text))
+
+    def _flush_lost_log(self):
+        if self.lost_log:
+            self.log("ESTOP", self.lost_log)
+            self.lost_log = ""
+
     def on_connect(self):
         self.io.send(self.status_line())
         self.io.send(format_map(self.track_map))
         if self.link_lost:
             self.io.send(format_error("E_LINK", "연결 끊김 후 재연결 - RESUME 필요"))
+        self._flush_lost_log()
 
     def on_heartbeat(self, ever_connected: bool, alive: bool):
         """주기적으로 호출. 첫 연결 전에는 감시하지 않는다 (functional_design F10)."""
+        if alive and self.link_lost:
+            self._flush_lost_log()                  # 소켓은 그대로인 채 PING만 끊겼다가 다시 옴 — 재연결이 없어 여기서 알림
         if not ever_connected or alive or self.link_lost:
             return
         self.link_lost = True
         self.watches.clear()
+        self.lost_log = "비상 정지: 연결 끊김 (노트북 PING이 안 옴) — RESUME 필요"
         self._emergency_stop()
 
     def _emergency_stop(self):
@@ -91,6 +105,7 @@ class BridgeCore:
             return
         if cmd.kind == "STOP":                      # 상태와 무관하게 즉시 (최우선)
             self.io.estop(True)
+            self.log("ESTOP", "비상 정지: 앱 STOP 명령")
         reason = check_allowed(cmd, self.state)
         if not reason and self.driving and cmd.key in ("MANUAL ON", "DEV WHEEL", "DEV DRIVE")                 and cmd.args[-1:] != ["STOP"]:
             reason = "라인 주행 중 — DEV DRIVE STOP 먼저"           # /cmd_vel·바퀴 명령이 겹치지 않게

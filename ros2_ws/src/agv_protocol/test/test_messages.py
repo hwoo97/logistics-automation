@@ -205,3 +205,8 @@ def test_dev_reset_parses_and_is_allowed_everywhere():
     assert cmd.key == "DEV RESET" and check_allowed(cmd, "ESTOP") is None and check_allowed(cmd, "NAVIGATE") is None
     with pytest.raises(ValueError):
         parse_command("DEV RESET ALL")
+
+
+def test_parse_dev_log():
+    r = parse_reply("DEV LOG STOP 정지선: STOP_LINE 확정 (0.3초)")
+    assert r == {"type": "DEV", "kind": "LOG", "category": "STOP", "text": "정지선: STOP_LINE 확정 (0.3초)"}

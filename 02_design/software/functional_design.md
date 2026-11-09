@@ -89,6 +89,7 @@
 | `/mission/command` | agv_interfaces/Command | bt_bridge → mission_node | 이벤트 | SETUP, START 원 사각, STOP, RESUME, MANUAL, MOVE |
 | `/mission/status` | agv_interfaces/Status | mission_node → bt_bridge | 2Hz + 변화 시 | 상태, 진행, 실은 화물·개수, 목적지, 트랙 매핑 |
 | `/mission/report` | std_msgs/String | mission_node → bt_bridge | 이벤트 | 블루투스 `EVENT`·`ERROR` 한 줄 (브리지가 그대로 전송) |
+| `/agv/log` | std_msgs/String | drive_node·line_node → bt_bridge | 동작이 바뀔 때 | `"MARKER …"`·`"STOP …"` 동작 로그 → 블루투스 `DEV LOG` (2026-11-09, Pi 정지선 진단 로그 대신) |
 | `/safety/estop` | std_msgs/Bool | bt_bridge·mission → motor_node | 이벤트 | 비상 정지 래치 |
 | `/dev/wheels` | std_msgs/Float32MultiArray | bt_bridge → motor_node | 0.3초 반복 | 개발자 탭: L1~L4 듀티 (-1~1), 워치독 적용 |
 | `/drive/speed` | std_msgs/Float32 | bt_bridge → drive_node | 이벤트 | 개발자 탭 "주행 속도": 라인 주행 기본 선속도 (0.2~1.0), 주행 중에도 적용 |

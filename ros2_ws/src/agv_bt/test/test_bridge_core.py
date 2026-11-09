@@ -140,7 +140,7 @@ def test_heartbeat(core):
     assert io.calls.count(("estop", True)) == 1
     io.sent.clear()
     c.on_connect()
-    assert [r["type"] for r in io.replies()] == ["STATUS", "MAP", "ERROR"]
+    assert [r["type"] for r in io.replies()] == ["STATUS", "MAP", "ERROR", "DEV"]   # DEV LOG ESTOP 연결 끊김
     c.on_line("RESUME")
     c.on_connect()
     assert io.replies("ERROR") and len(io.replies("ERROR")) == 1   # 재개 후에는 E_LINK 없음
@@ -269,3 +269,28 @@ def test_dev_reset_standalone_goes_idle(core):
     c.on_line("DEV RESET")
     assert c.state == "IDLE" and ("estop", False) in io.calls
     assert io.replies("EVENT")[-1]["event"] == "RESET"
+
+
+# ── 동작 로그 DEV LOG (2026-11-09) ──
+def test_stop_logs_estop_reason(core):
+    c, io = core
+    c.on_line("STOP")
+    logs = [r for r in io.replies("DEV") if r["kind"] == "LOG"]
+    assert logs and logs[0]["category"] == "ESTOP" and "앱 STOP" in logs[0]["text"]
+
+
+def test_link_lost_reason_sent_when_ping_returns(core):
+    """소켓은 그대로인 채 PING만 끊겼다가 다시 오면(재연결 없음) 그때 비상 정지 이유를 알림 — 한 번만."""
+    c, io = core
+    c.on_heartbeat(ever_connected=True, alive=False)
+    assert not [r for r in io.replies("DEV") if r["kind"] == "LOG"]          # 끊긴 동안은 못 보냄
+    c.on_heartbeat(ever_connected=True, alive=True)
+    c.on_heartbeat(ever_connected=True, alive=True)
+    logs = [r for r in io.replies("DEV") if r["kind"] == "LOG"]
+    assert len(logs) == 1 and logs[0]["category"] == "ESTOP" and "연결 끊김" in logs[0]["text"]
+
+
+def test_core_log_format(core):
+    c, io = core
+    c.log("MARKER", "마커 판단: LEFT [스티커 왼쪽 5/5]")
+    assert io.sent[-1] == "DEV LOG MARKER 마커 판단: LEFT [스티커 왼쪽 5/5]"

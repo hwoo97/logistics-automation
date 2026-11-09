@@ -78,6 +78,7 @@
 | `DEV LINE <offset> <event> [<raw_event> [<angle>]]` | `DEV LINE -0.12 NONE STOP_LINE 87.5` | 라인 오프셋(-1~1), 확정 이벤트, 이번 프레임 판정(확인 전, 생략 시 event와 같음), 라인 각도(도, 90 = 똑바로, 못 믿으면 `-`) — `/line/state` |
 | `DEV SYS <temp_c> <cpu_pct> <mem_pct>` | `DEV SYS 52.1 37 41` | Pi CPU 온도·사용률·메모리 (1Hz) |
 | `DEV NODES <이름,...>` | `DEV NODES camera,led_node,motor_node` | `DEV NODES` 응답 |
+| `DEV LOG <MARKER\|STOP\|ESTOP> <글>` | `DEV LOG MARKER 마커 판단: LEFT [스티커 왼쪽 5/5 오른쪽 0/5, 갈래 왼쪽 4/5 오른쪽 0/5]` | **동작 로그** (2026-11-09, 요청 없이 연결돼 있으면 항상) — MARKER: 마커 인식(감속·멈춰서 확인)·판단과 표 수, STOP: 정지선 확인·확정·실패·통과, 정지 이유(장애물·라인 끝·영상 끊김·회전 실패)·`주행 끝 <결과>`·정지선 놓침 의심, ESTOP: 비상 정지 원인(앱 STOP / 연결 끊김 — PING이 다시 오거나 재연결될 때). drive_node·line_node `/agv/log` → 브리지. 연결이 끊긴 동안의 로그는 버림. 앱 개발자 탭 메시지 콘솔에 종류별 색으로 |
 | `DEV CAL <RUNNING 팬 각도\|DONE 팬\|FAIL 이유\|RESET 팬\|CANCELLED\|SIGN 틸트>` | `DEV CAL DONE 66.0` | 정면 자동 맞춤 진행·결과, SIGN 틸트 저장 결과 (`/pantilt/calibration`) |
 
 - `DEV` 명령의 수신 결과는 `ACK DEV <하위명령>` / `NAK DEV <하위명령> <이유>` (예: `NAK DEV WHEEL NAVIGATE 상태에서 불가`)

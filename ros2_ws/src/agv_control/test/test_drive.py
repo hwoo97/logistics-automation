@@ -1214,3 +1214,51 @@ def test_skip_window_off():
     for _ in range(200):
         d.step(AHEAD, DT)
     assert d.skip_stop == 1
+
+
+# ── 동작 로그 (앱 콘솔, 2026-11-09) ──
+def logs_of(d, kind):
+    return [t for k, t in d.take_logs() if k == kind]
+
+
+def test_marker_logs_recognition_and_decision_with_votes():
+    d = marker_drive()
+    d.step(AHEAD, DT, see("left", y=80.0))                  # 감속 구간
+    d.step(AHEAD, DT, see("left"))                          # 정지 구간
+    check(d, "left")
+    texts = logs_of(d, "MARKER")
+    assert any("마커 인식: red 왼쪽" in t and "감속" in t for t in texts)
+    assert any("멈추고 좌우 확인" in t for t in texts)
+    assert any(t.startswith("마커 판단: LEFT [스티커 왼쪽") for t in texts)
+    assert d.take_logs() == []                              # 비우면 다시 안 나옴
+
+
+def test_straight_marker_decision_logged():
+    d = marker_drive()
+    d.step(AHEAD, DT, see("center"))
+    assert logs_of(d, "MARKER") == ["마커 판단: STRAIGHT (앞 라인 위 마커)"]
+
+
+def test_stop_line_note_goes_to_stop_log():
+    d = DriveController()
+    d.start(DriveCommand.FOLLOW_TO_EVENT)
+    d.step(LineInput(0.0, True, LineEvent.NONE, LineEvent.STOP_LINE), DT)
+    assert any(t.startswith("정지선: STOP_LINE 보임") for t in logs_of(d, "STOP"))
+
+
+def test_line_timeout_logs_reason():
+    d = DriveController()
+    d.start(DriveCommand.FOLLOW_TO_EVENT)
+    out = None
+    for _ in range(20):
+        out = d.step(None, DT)
+        if out.done:
+            break
+    assert out.result == "E_LINE" and any("라인 영상" in t for t in logs_of(d, "STOP"))
+
+
+def test_logs_are_capped():
+    d = DriveController()
+    for i in range(80):
+        d._log("STOP", str(i))
+    assert len(d.logs) == 50 and d.logs[-1] == ("STOP", "79")

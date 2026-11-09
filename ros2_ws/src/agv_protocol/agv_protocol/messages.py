@@ -306,6 +306,8 @@ def parse_reply(line: str) -> dict:
                 return {"type": "DEV", "kind": kind, "state": rest[1], "result": " ".join(rest[2:])}
             if kind == "NODES":
                 return {"type": "DEV", "kind": kind, "nodes": rest[1].split(",") if len(rest) > 1 else []}
+            if kind == "LOG":                   # DEV LOG <MARKER|STOP|ESTOP> <글> — 동작 로그 (2026-11-09)
+                return {"type": "DEV", "kind": kind, "category": rest[1], "text": " ".join(rest[2:])}
             if kind == "CAL":                   # DEV CAL <RUNNING 팬 각도|-|DONE 팬|FAIL 이유|RESET 팬|CANCELLED|SIGN 틸트>
                 return {"type": "DEV", "kind": kind, "state": rest[1], "detail": " ".join(rest[2:])}
     except (IndexError, ValueError) as e:
