@@ -2,7 +2,7 @@
 from .base import SegmentDriver
 from .gpio import open_header_chip
 
-DEFAULT_PINS = (4, 27, 12, 13, 7, 10, 11)          # a, b, c, d, e, f, g — pinmap.md (e: GPIO9 → 7, 2026-11-09)
+DEFAULT_PINS = (4, 27, 12, 13, 14, 10, 11)         # a, b, c, d, e, f, g — pinmap.md (e: GPIO9 → 14, 2026-11-09)
 
 
 class LgpioSegmentDriver(SegmentDriver):

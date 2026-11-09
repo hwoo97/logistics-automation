@@ -188,7 +188,7 @@ pantilt_node:    { ros__parameters: { pan_channel: 0, tilt_channel: 1, poses: { 
 line_node:       { ros__parameters: { roi_ratio: 0.33, confirm_frames: 3 } }
 marker_node:     { ros__parameters: { red: [168, 10, 125, 125], yellow: [...], green: [...], blue: [...], min_area: 30 } }
 classifier_node: { ros__parameters: { sign_model: models/sign.tflite, min_score: 0.8 } }
-segment_node:    { ros__parameters: { pins: [4, 27, 12, 13, 7, 10, 11], common_anode: false } }
+segment_node:    { ros__parameters: { pins: [4, 27, 12, 13, 14, 10, 11], common_anode: false } }
 ultrasonic_node: { ros__parameters: { rate_hz: 15, median_window: 5 } }
 mission_node:    { ros__parameters: { sign_distance: 0.20, approach_timeout_s: 10.0, item_interval_s: 1.0, obstacle_distance: 0.15, obstacle_clear_s: 1.0, sign_retry: 1, map_file: ~/.agv/track_map.json } }
 bt_bridge_node:  { ros__parameters: { heartbeat_timeout_s: 1.5, video_fps: 5, video_size: [320, 240], jpeg_quality: 50 } }
