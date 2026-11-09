@@ -15,6 +15,7 @@ MOVE_REPEAT_S = 0.3
 
 ALL_STATES = frozenset(s.value for s in State)
 _HW_STATES = frozenset({"IDLE", "MANUAL", "ESTOP", "ERROR"})
+DIGIT_CHARS = tuple("0123456789") + ("-", "E", "OFF")   # DEV DIGIT — 7세그먼트 한 글자, OFF = 끔
 
 # 명령별 허용 상태 (bluetooth_protocol.md 2절·3-1절)
 ALLOWED_STATES = {
@@ -27,6 +28,7 @@ ALLOWED_STATES = {
     "MOVE": frozenset({"MANUAL"}),
     "PING": ALL_STATES,
     "DEV LED": _HW_STATES,
+    "DEV DIGIT": _HW_STATES,              # 7세그먼트 시험 (2026-11-09)
     "DEV POSE": _HW_STATES,
     "DEV SERVO": _HW_STATES,
     "DEV WHEEL": frozenset({"IDLE", "MANUAL"}),
@@ -95,6 +97,9 @@ def _validate_dev(cmd: Command) -> None:
     if sub == "LED":
         if len(rest) != 1 or rest[0] not in LedState.__members__:
             raise ValueError(f"DEV LED: {'/'.join(LedState.__members__)} 중 하나")
+    elif sub == "DIGIT":
+        if len(rest) != 1 or rest[0] not in DIGIT_CHARS:
+            raise ValueError("DEV DIGIT: 0~9, -, E, OFF 중 하나")
     elif sub == "POSE":
         if len(rest) != 1 or rest[0] not in Pose.__members__:
             raise ValueError(f"DEV POSE: {'/'.join(Pose.__members__)} 중 하나")

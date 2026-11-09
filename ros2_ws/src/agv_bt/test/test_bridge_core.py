@@ -294,3 +294,14 @@ def test_core_log_format(core):
     c, io = core
     c.log("MARKER", "마커 판단: LEFT [스티커 왼쪽 5/5]")
     assert io.sent[-1] == "DEV LOG MARKER 마커 판단: LEFT [스티커 왼쪽 5/5]"
+
+
+def test_dev_digit_reaches_io(core):
+    """7세그먼트 시험 (2026-11-09) — OFF는 빈칸(끔)으로."""
+    c, io = core
+    c.on_line("DEV DIGIT 7")
+    c.on_line("DEV DIGIT OFF")
+    assert ("digit", "7") in io.calls and ("digit", " ") in io.calls
+    c.on_line("DEV DIGIT 12")
+    nak = io.replies("NAK")[-1]
+    assert nak["command"] == "DEV DIGIT" and "0~9" in nak["reason"]

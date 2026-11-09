@@ -58,6 +58,7 @@
 | 메시지 | 예시 | 의미 | 전달 토픽 | 허용 상태 |
 |--------|------|------|-----------|-----------|
 | `DEV LED <OFF\|RED\|GREEN\|ERROR>` | `DEV LED RED` | LED 표시 | `/led/state` | IDLE, MANUAL, ESTOP, ERROR |
+| `DEV DIGIT <0~9\|-\|E\|OFF>` | `DEV DIGIT 8` | 7세그먼트 표시 시험 (2026-11-09, OFF = 끔). 앱 개발자 탭 "7세그먼트" 버튼·"0~9 차례로" | `/display/digit` | IDLE, MANUAL, ESTOP, ERROR |
 | `DEV POSE <LINE\|JUNCTION\|SIGN>` | `DEV POSE SIGN` | 팬틸트 정해진 자세 | `/pantilt/pose` | IDLE, MANUAL, ESTOP, ERROR |
 | `DEV SERVO <pan> <tilt>` | `DEV SERVO 90 60` | 팬·틸트 각도 직접 지정 (0~180°) | `/dev/pantilt_angle` | IDLE, MANUAL, ESTOP, ERROR |
 | `DEV WHEEL <l1> <l2> <l3> <l4>` | `DEV WHEEL 0.3 0.3 0 0` | 바퀴 4개 개별 듀티 (-1.0~1.0, 0.3초마다 반복, 끊기면 정지) | `/dev/wheels` | IDLE, MANUAL |

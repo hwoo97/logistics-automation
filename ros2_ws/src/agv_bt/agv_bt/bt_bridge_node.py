@@ -47,6 +47,7 @@ class BtBridgeNode(Node):
         self.pub_estop = self.create_publisher(Bool, "/safety/estop", q10)
         self.pub_cmd = self.create_publisher(Twist, "/cmd_vel", QoSProfile(depth=1))
         self.pub_led = self.create_publisher(String, "/led/state", q10)
+        self.pub_digit = self.create_publisher(String, "/display/digit", q10)   # DEV DIGIT 7세그먼트 시험
         self.pub_pose = self.create_publisher(String, "/pantilt/pose", q10)
         self.pub_angle = self.create_publisher(Float32MultiArray, "/dev/pantilt_angle", q10)
         self.pub_wheels = self.create_publisher(Float32MultiArray, "/dev/wheels", QoSProfile(depth=1))
@@ -112,6 +113,9 @@ class BtBridgeNode(Node):
 
     def led(self, state):
         self.pub_led.publish(String(data=state))
+
+    def digit(self, char):
+        self.pub_digit.publish(String(data=char))
 
     def pose(self, name):
         self.pub_pose.publish(String(data=name))

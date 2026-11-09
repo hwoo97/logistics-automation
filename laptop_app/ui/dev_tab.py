@@ -49,6 +49,16 @@ class DevTab(ttk.Frame):
             ttk.Radiobutton(led, text=v, value=v, variable=self.led,
                             command=lambda: self.send("DEV", "LED", self.led.get())).grid(row=0, column=i, padx=2)
 
+        seg = ttk.LabelFrame(f, text="7세그먼트  (/display/digit)")
+        seg.pack(fill="x", pady=(0, 4))
+        for i, ch in enumerate(("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "-", "E", "OFF")):
+            ttk.Button(seg, text=ch, width=4 if ch == "OFF" else 2,
+                       command=lambda ch=ch: self.send("DEV", "DIGIT", ch)).grid(row=0, column=i, padx=1, pady=2)
+        self._seg_after = None
+        ttk.Button(seg, text="0~9 차례로", command=self._digit_sweep).grid(row=1, column=0, columnspan=6, sticky="w", pady=(0, 2))
+        ttk.Label(seg, text="한 자리씩 0.5초 → 마지막 8 (전 세그먼트)", foreground="gray").grid(
+            row=1, column=6, columnspan=7, sticky="w")
+
         pt = ttk.LabelFrame(f, text="팬틸트  (/pantilt/pose · 각도)")
         pt.pack(fill="x", pady=(0, 4))
         for i, p in enumerate(("LINE", "JUNCTION", "SIGN")):
@@ -320,6 +330,16 @@ class DevTab(ttk.Frame):
         box.bind("<<ComboboxSelected>>", lambda e: self._send_target())
         ttk.Label(f, text="NONE = 마커 안 봄", foreground="gray").grid(row=len(rows) + 2, column=2, sticky="w")
         return f
+
+    def _digit_sweep(self, i: int = 0):
+        """7세그먼트 0~9를 0.5초씩 차례로, 마지막에 8(모든 세그먼트) — 배선·세그먼트 확인 (2026-11-09)."""
+        if self._seg_after:
+            self.after_cancel(self._seg_after)
+            self._seg_after = None
+        seq = "01234567898"
+        if i >= len(seq) or not self.send("DEV", "DIGIT", seq[i]):
+            return
+        self._seg_after = self.after(500, lambda: self._digit_sweep(i + 1))
 
     def _nudge(self, var, lo, hi, step, send):
         var.set(round(min(hi, max(lo, var.get() + step)), 2))

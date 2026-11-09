@@ -2,7 +2,7 @@
 
 출력은 io 객체의 메서드로 내보낸다 (노드는 이를 ROS 토픽 발행으로 연결, 시험은 가짜 io로 확인).
   io.send(line) / io.estop(bool) / io.cmd_vel(v, w) / io.led(state) / io.pose(name)
-  io.servo(pan, tilt) / io.wheels([l1..l4]) / io.speed(v) / io.drive("FOLLOW"|"STOP") / io.tune(key, v)
+  io.digit(char) / io.servo(pan, tilt) / io.wheels([l1..l4]) / io.speed(v) / io.drive("FOLLOW"|"STOP") / io.tune(key, v)
   io.node_names() -> list / io.calibrate("AUTO"|"RESET")
   io.mission(cmd)
 
@@ -152,6 +152,8 @@ class BridgeCore:
     def _dev(self, sub, rest):
         if sub == "LED":
             self.io.led(rest[0])
+        elif sub == "DIGIT":                                # 7세그먼트 시험 — OFF는 빈칸(끔)
+            self.io.digit(" " if rest[0] == "OFF" else rest[0])
         elif sub == "POSE":
             self.io.pose(rest[0])
         elif sub == "SERVO":

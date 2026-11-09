@@ -210,3 +210,14 @@ def test_dev_reset_parses_and_is_allowed_everywhere():
 def test_parse_dev_log():
     r = parse_reply("DEV LOG STOP 정지선: STOP_LINE 확정 (0.3초)")
     assert r == {"type": "DEV", "kind": "LOG", "category": "STOP", "text": "정지선: STOP_LINE 확정 (0.3초)"}
+
+
+@pytest.mark.parametrize("ch", ["0", "9", "-", "E", "OFF"])
+def test_dev_digit_valid(ch):
+    assert parse_command(f"DEV DIGIT {ch}").args == ["DIGIT", ch]
+
+
+@pytest.mark.parametrize("line", ["DEV DIGIT", "DEV DIGIT A", "DEV DIGIT 10", "DEV DIGIT 1 2"])
+def test_dev_digit_invalid(line):
+    with pytest.raises(ValueError):
+        parse_command(line)

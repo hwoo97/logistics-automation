@@ -190,6 +190,8 @@ class FakeVehicle:
     def handle_dev(self, sub, rest, now):
         if sub == "LED":
             self.led = rest[0]
+        elif sub == "DIGIT":
+            self.digit = rest[0]
         elif sub == "POSE":
             self.pan, self.tilt = POSES[rest[0]]
         elif sub == "SERVO":
