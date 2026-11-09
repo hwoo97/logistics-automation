@@ -256,3 +256,69 @@ def test_short_noise_is_not_miss():
     m = MissTracker(3)
     for r in (CAND, CAND, NONE, NONE):
         assert m.push(r) is None
+
+
+# ── 2026-11-09 교수 점검 반영 (①~④) ──
+def perspective_scene(stop=(131, 145)):
+    """원근 — 라인 굵기 ≈ 0.062 × (행 + 188)px (교수 점검 실측: 아래 26px, 위 12px). 먼 정지선은 얇게 보임."""
+    img = floor()
+    for y in range(H):
+        half = 0.062 * (y + 188) / 2
+        img[y, int(160 - half): int(160 + half)] = 25
+    img[stop[0]:stop[1], 100:220] = 25
+    return img
+
+
+def test_far_stop_line_judged_with_local_line_width():
+    """① 정지선 높이의 라인 굵기(≈20.7px)로 판정 — 관심 영역 전체 중앙값(≈23px)이면 두께 14줄이 기준 미달."""
+    assert run(perspective_scene()).detected
+    det = StopLineDetector()
+    det.process(perspective_scene(), 0.0)
+    assert det.last_local is not None and 19 <= det.last_local <= 22
+
+
+def test_held_with_lower_thickness():
+    """② 판정 직후는 두께 기준 0.5 — 처음부터 그 두께면 판정 안 함 (0.65 미달)."""
+    thin = scene(y=(195, 207))                    # 12줄 = 라인 20px × 0.6
+    det = StopLineDetector()
+    assert det.process(scene(), 0.0).detected
+    assert det.process(thin, 0.0).detected
+    assert not run(thin).detected
+
+
+def sticker(img, x0, x1, y0, y1, bgr=(30, 30, 220)):
+    img[y0:y1, x0:x1] = bgr
+
+
+def test_sticker_on_cross_line_is_junction():
+    """④ 가로선 위 스티커 = 분기점 (색 확인). 분기점 확인을 끄면 정지선으로 판정 (③으로 스티커도 가로선에 포함)."""
+    img = scene()
+    sticker(img, 104, 128, *STOP_Y)
+    r = run(img)
+    assert not r.detected and r.reason.startswith("분기점") and r.candidate
+    assert run(img, junction_check=False).detected
+
+
+def test_cross_line_continuing_beyond_ends_is_junction():
+    """④ 가로선이 양끝 너머로 이어지면(가늘어 정지선 열로는 안 잡혀도) 분기점 (이어짐 확인)."""
+    img = scene()
+    img[194:206, 30:100] = 25                     # 12줄 — 두께 기준(13) 미달이라 정지선 폭에는 안 들어감 (화면 끝까지 덮으면 그 줄 바닥이 검정이 됨)
+    img[194:206, 220:290] = 25
+    r = run(img)
+    assert not r.detected and r.reason.startswith("분기점")
+    assert run(img, frames=1, junction_check=False).detected   # 첫 프레임 — 다음부터는 ② 낮은 기준으로 가는 선까지 폭에 들어감
+
+
+def test_sticker_ahead_of_stop_line_is_not_junction():
+    """정지선 2w 앞 라인 위 스티커는 분기점 아님 — 색 확인은 정지선 세로 범위(± 0.25 라인 굵기)만 봄."""
+    img = scene()
+    sticker(img, 150, 170, 140, 160)
+    assert run(img).detected
+
+
+@pytest.mark.parametrize("y0", [121, 123, 125])
+def test_stop_line_just_entering_roi_top_is_not_junction(y0):
+    """관심 영역 맨 위로 막 들어온 정지선(처음 판정되는 위치)을 분기점으로 보지 않음 — 중심선 위아래 띠가 위로 잘려도 이어짐 아님."""
+    r = run(scene(y=(y0, y0 + 14)), frames=1)
+    assert r.detected, r.reason
+

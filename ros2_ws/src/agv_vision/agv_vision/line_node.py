@@ -68,6 +68,12 @@ class LineNode(Node):
             confirm_frames=cfg.confirm_frames,
             hold_frames=p("stop_hold_frames", s.hold_frames).value,
             hold_max_thick=p("stop_hold_max_thick", s.hold_max_thick).value,
+            keep_thickness=p("stop_keep_thickness", s.keep_thickness).value,
+            sticker_as_line=cfg.sticker_as_line,
+            sticker_s_min=cfg.sticker_s_min,
+            sticker_v_min=cfg.sticker_v_min,
+            junction_check=p("stop_junction_check", s.junction_check).value,
+            junction_reach=p("stop_junction_reach", s.junction_reach).value,
         )
         self.stop_line = StopLineDetector(stop_cfg)
         self.offset = 0.0                               # 마지막 라인 오프셋 — 라인을 놓친 프레임의 정지선 판정에 씀

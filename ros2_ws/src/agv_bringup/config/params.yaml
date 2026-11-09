@@ -83,6 +83,9 @@ line_node:
     stop_max_tilt_deg: 35.0     # 이보다 기울면 정지선 아님
     stop_gap_cols: 3            # 테이프 반사로 이만큼 끊겨도 이어진 것으로 봄
     stop_hold_frames: 20        # 판정 후 이 프레임 동안 아래로 나가는 정지선도 인정
+    stop_keep_thickness: 0.5    # 판정 직후(hold 중) 두께 기준 — 시작(0.65)보다 낮게 (2026-11-09 교수 점검 ②)
+    stop_junction_check: true   # 정지선 판정 뒤 분기점(스티커 T자) 확인 (교수 점검 ④)
+    stop_junction_reach: 3.0    # 가로선이 양끝 너머로 라인 굵기 3개만큼 이어지면 분기점
 
 marker_node:
   ros__parameters:

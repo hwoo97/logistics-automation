@@ -10,7 +10,17 @@
             단 판정 직후에는 아래로 나가는 구간도 인정 — 지연·관성으로 지나쳐 멈춰도 판정이 사라지지 않게
   전체    : 그런 열이 라인 왼쪽·오른쪽에 모두 이어지고, 폭이 라인 굵기의 width_ratio배, 화면 양끝에 모두 닿지 않음(T자 제외),
             기울기 ≤ max_tilt_deg
-검정 추출은 line_detect.black_mask를 그대로 쓴다. 같은 판정이 confirm_frames번 쌓이면 확정(한 프레임 빠짐 허용).
+같은 판정이 confirm_frames번 쌓이면 확정(한 프레임 빠짐 허용).
+
+2026-11-09 교수 점검(00_instructor/2026-11-09.md) 반영:
+  ① 라인 굵기 = 정지선 높이의 굵기 — 차량에 가까운 끝(화면 아래, 유턴 뒤엔 위)에서 라인을 따라가며 줄마다 폭을 재고
+     넓은 줄(정지선)에 닿으면 그 바로 앞 8줄의 중앙값. 관심 영역 전체 중앙값은 원근 때문에 가까운 굵은 쪽에 가까워
+     먼 정지선의 두께가 기준과 거의 같아지고, 첫 판정 직후 판정이 사라져 재출발했다.
+  ② 판정 직후(hold 중)는 두께 기준을 keep_thickness(0.5)로 낮춤 — 시작 기준보다 유지 기준을 낮게.
+  ③ 마스크 = line_detect.line_mask (검정 + 라인 위 색 스티커) — 스티커 자리가 가로선의 빈 구간이 되지 않게.
+  ④ 판정이 참이면 분기점인지 한 번 더 — 가로선이 양끝 너머로 junction_reach × 라인 굵기만큼 이어지거나(주),
+     가로선 위에 스티커 색이 있으면(보조) 분기점으로 보고 제외. 비스듬히 다가간 T자 분기점에서 스티커 사이 구간이
+     짧은 정지선으로 판정되던 것. 트랙 전제: 정지선 가로선 위에는 스티커를 붙이지 않는다.
 """
 from dataclasses import dataclass
 
@@ -18,7 +28,7 @@ import cv2
 import numpy as np
 
 from agv_protocol.types import LineEvent
-from agv_vision.line_detect import EventConfirmer, _spans, black_mask
+from agv_vision.line_detect import EventConfirmer, _spans, line_mask
 
 
 @dataclass
@@ -34,6 +44,7 @@ class StopLineConfig:
     max_line_px: int = 45
     width_ratio: tuple = (3.0, 12.0)    # 정지선 가로 폭 = 라인 굵기의 3~12배 (트랙 규격 4~5배)
     min_thickness: float = 0.65         # 세로 두께 ≥ 라인 굵기 × 이 값 (실측: 같은 테이프 0.76~0.79배, 얇은 바닥 선 제외)
+    keep_thickness: float = 0.5         # 판정 직후(hold 중) 두께 기준 — 시작보다 유지 기준을 낮게 (2026-11-09 교수 점검 ②)
     side_min_ratio: float = 0.5         # 라인 바깥으로 양쪽 각각 라인 굵기 × 이 값 이상 이어져야 함
     gap_cols: int = 3                   # 정지선 열이 이만큼까지 끊겨도 이어진 것으로 봄 (테이프 반사)
     max_tilt_deg: float = 35.0          # 이보다 기울면 정지선 아님 (대각선 라인)
@@ -41,6 +52,12 @@ class StopLineConfig:
     confirm_frames: int = 3
     hold_frames: int = 20               # 판정 후 이 프레임 동안은 관심 영역 아래로 나가는 정지선도 인정 (지연·관성으로 지나쳐 멈춤)
     hold_max_thick: float = 2.5         # 그때 아래에 닿는 구간 두께 상한 (라인 굵기 배수) — 넘으면 라인으로 봄
+    sticker_as_line: bool = True        # 이하 3개는 LineConfig와 같은 뜻 — 정지선 마스크에도 라인 위 스티커 포함 (③)
+    sticker_s_min: int = 100
+    sticker_v_min: int = 80
+    junction_check: bool = True         # ④ 분기점 확인
+    junction_reach: float = 3.0         # 가로선 양끝 너머로 라인 굵기의 이 배수만큼 이어지면 분기점
+    junction_color_px: int = 20         # 가로선 위 스티커 색 화소가 이만큼 이상이면 분기점
 
 
 @dataclass
@@ -64,6 +81,9 @@ class StopLineDetector:
         self.confirm = EventConfirmer(self.cfg.confirm_frames, tolerant={LineEvent.STOP_LINE})
         self.hold = 0                                 # 남은 "아래로 나가도 인정" 프레임
         self.reason, self.candidate = "", False       # 마지막 _find의 탈락 이유·후보 여부
+        self.last_px = None                           # 마지막으로 잰 라인 굵기 (따라간 줄 전체)
+        self.last_local = None                        # 마지막으로 잰 정지선 높이의 라인 굵기
+        self.arm = None                               # 판정된 정지선 (위, 아래, 기울기, 절편, 왼, 오른, 라인 굵기)
 
     def set_frames(self, frames: int) -> None:
         """노트북 앱 "확인 프레임" (DEV TUNE CONFIRM)."""
@@ -73,8 +93,13 @@ class StopLineDetector:
         """offset: line_node의 라인 오프셋 (-1~1)."""
         c = self.cfg
         img = cv2.resize(bgr, (c.width, c.height), interpolation=cv2.INTER_AREA)
-        mask = black_mask(img[int(c.height * (1 - c.roi_ratio)):, :], c)
+        roi = img[int(c.height * (1 - c.roi_ratio)):, :]
+        mask = line_mask(roi, c)                                                    # ③
         found, angle = self._find(mask, (offset + 1) * c.width / 2, self.hold > 0)
+        if found and c.junction_check and self._is_junction(roi):                  # ④
+            found, angle = False, 0.0
+            self.reason = "분기점 (가로선이 양끝 너머로 이어지거나 가로선 위에 스티커)"
+            self.candidate = True
         self.hold = c.hold_frames if found else max(0, self.hold - 1)
         event = LineEvent.STOP_LINE if found else LineEvent.NONE
         confirmed = self.confirm.push(event) == LineEvent.STOP_LINE
@@ -82,16 +107,42 @@ class StopLineDetector:
                               "" if found else self.reason, (not found) and self.candidate)
 
     def _line_px(self, mask: np.ndarray, line_x: float) -> float:
-        """줄마다 라인 위치에 가장 가까운 가는 구간 폭의 중앙값 (정지선이 가까운 띠를 가려도 되게 관심 영역 전체)."""
+        """정지선 높이의 라인 굵기 (①). 차량에 가까운 끝(화면 아래, 유턴 뒤에는 화면 위)에서 라인을 따라가며 줄마다
+        폭을 재고 넓은 줄(정지선)에서 멈춘다. 정지선에 닿았으면 그 바로 앞 8줄의 중앙값, 아니면 따라간 줄 전체 중앙값.
+        잴 수 없으면 직전 값, 그것도 없으면 default_line_px."""
         c = self.cfg
-        widths = []
-        for y in range(mask.shape[0]):
-            runs = [(a, b) for a, b in _spans(mask[y] > 0) if b - a + 1 <= c.max_line_px]
-            if runs:
-                a, b = min(runs, key=lambda r: abs((r[0] + r[1]) / 2 - line_x))
-                if abs((a + b) / 2 - line_x) <= c.max_line_px:
-                    widths.append(b - a + 1)
-        return float(np.median(widths)) if widths else float(c.default_line_px)
+        best, best_hit = [], False
+        cache = {}                                     # 줄마다 구간은 한 번만 계산 (아래·위 두 번 따라가도 시간 그대로)
+        for rows in (range(mask.shape[0] - 1, -1, -1), range(mask.shape[0])):
+            ref, widths, miss, hit = line_x, [], 0, False
+            for y in rows:
+                if y not in cache:
+                    cache[y] = _spans(mask[y] > 0)
+                near = [s for s in cache[y]
+                        if s[0] - c.max_line_px / 2 <= ref <= s[1] + c.max_line_px / 2]
+                if not near:
+                    miss += 1
+                    if widths and miss > 3:
+                        break
+                    continue
+                a, b = min(near, key=lambda s: abs((s[0] + s[1]) / 2 - ref))
+                if b - a + 1 > c.max_line_px:          # 정지선 줄에 닿음
+                    if widths:
+                        hit = True
+                        break
+                    continue
+                widths.append(b - a + 1)
+                ref, miss = (a + b) / 2, 0
+            if len(widths) > len(best):
+                best, best_hit = widths, hit
+        if len(best) >= 5:
+            self.last_px = float(np.median(best))
+            self.last_local = float(np.median(best[-8:])) if best_hit else None
+        elif len(best) >= 2 and best_hit:
+            self.last_local = float(np.median(best))
+        if self.last_local is not None:
+            return self.last_local
+        return self.last_px if self.last_px is not None else float(c.default_line_px)
 
     def _find(self, mask: np.ndarray, line_x: float, holding: bool = False) -> tuple[bool, float]:
         c = self.cfg
@@ -107,8 +158,10 @@ class StopLineDetector:
             return False, 0.0
         comp = labels == ids[np.argmax(counts)]
 
-        need = max(2.0, c.min_thickness * line_px)
+        self.arm = None
+        need = max(2.0, (c.keep_thickness if holding else c.min_thickness) * line_px)       # ②
         centers = np.full(w, np.nan)                  # 정지선 열의 세로 중심 (아니면 nan)
+        runs = [None] * w                             # 정지선 열의 세로 구간
         touch = np.zeros(w, bool)                     # 관심 영역 위·아래에 닿는 열 = 라인
         for x in range(w):
             run = _longest_run(comp[:, x])
@@ -119,6 +172,7 @@ class StopLineDetector:
                 touch[x] = True
             elif thick >= need:
                 centers[x] = (run[0] + run[1]) / 2
+                runs[x] = run
 
         n_cols = int(np.count_nonzero(~np.isnan(centers)))
         self.candidate = n_cols >= line_px
@@ -159,7 +213,53 @@ class StopLineDetector:
         angle = float(np.degrees(np.arctan(-slope)))
         if abs(angle) > c.max_tilt_deg:
             self.reason = f"기울기 {angle:.0f}° (허용 ±{c.max_tilt_deg:g}°)"
-        return abs(angle) <= c.max_tilt_deg, angle
+            return False, angle
+        # ④용 — 세로 범위·중심선은 라인에서 라인 굵기 1개 이상 떨어진 좌우 부분 열로만 (라인에 붙은 열은 근처 스티커까지 늘어남)
+        arm = [int(x) for x in xs if (x <= line_l - line_px or x >= line_r + line_px) and runs[x][1] < h - 1]
+        if len(arm) < 5:
+            arm = [int(x) for x in xs]
+        a_slope, a_b = np.polyfit(arm, centers[arm], 1)
+        self.arm = (min(runs[x][0] for x in arm), max(runs[x][1] for x in arm), float(a_slope), float(a_b),
+                    left, right, line_px)
+        return True, angle
+
+    def _is_junction(self, roi: np.ndarray) -> bool:
+        """정지선 판정 뒤 추가 확인 (④) — 참이면 분기점으로 보고 정지선에서 제외."""
+        c = self.cfg
+        if self.arm is None:
+            return False
+        top, bottom, slope, b, left, right, lp = self.arm
+        h, w = roi.shape[:2]
+        # 색 확인(보조): 정지선 좌우 부분 위에 스티커 색
+        if c.sticker_as_line:
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            color = ((hsv[..., 1] >= c.sticker_s_min) & (hsv[..., 2] >= c.sticker_v_min)).astype(np.uint8)
+            color = cv2.morphologyEx(color, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+            py, px = int(round(0.25 * lp)), int(round(lp))
+            if color[max(0, top - py): bottom + py + 1, max(0, left - px): right + px + 1].sum() >= c.junction_color_px:
+                return True
+        # 이어짐 확인(주): 양끝 바깥으로 중심선을 따라 라인 굵기 junction_reach개 — 둘 다 이어지면 분기점
+        m = line_mask(roi, c, c.max_line_px) > 0      # 스티커 포함 · 위아래 줄 바닥 기준 (가로선이 줄 전체를 덮어도 검정)
+        half, span = max(2, round(0.5 * lp)), max(6, round(c.junction_reach * lp))
+        edge = max(1, int(w * c.edge_ratio))
+
+        def goes_on(x_end: int, step: int) -> bool:
+            if (step < 0 and x_end < edge) or (step > 0 and x_end >= w - edge):
+                return True                            # 이미 화면 가장자리
+            dark = n = 0
+            for k in range(1, span + 1):
+                x = x_end + step * k
+                if not 0 <= x < w:
+                    break
+                y = slope * x + b
+                if y < 0 or y >= h:
+                    return True                        # 중심선이 관심 영역 밖으로 벗어남
+                # (y - half < 0으로 보면 관심 영역 맨 위로 막 들어온 정지선을 분기점으로 봄 — 2026-11-09 점검)
+                dark += m[max(0, int(y) - half): int(y) + half + 1, x].mean() >= 0.5
+                n += 1
+            return n > 0 and dark / n >= 0.5
+
+        return goes_on(left, -1) and goes_on(right, 1)
 
     def _extent(self, centers: np.ndarray, start: int, step: int, line_px: float) -> int | None:
         """start에서 step 방향으로 정지선 열이 이어지는 가장 먼 x. 첫 열까지는 라인 굵기만큼 비어도 됨(기운 라인)."""
