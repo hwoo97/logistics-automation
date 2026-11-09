@@ -152,10 +152,12 @@ class DriveNode(Node):
                 return
             line, self.line = self.line, None
             markers, self.markers = self.markers, None
-            decision_no = self.ctrl.decision_no
+            decision_no, note_no = self.ctrl.decision_no, self.ctrl.note_no
             out = self.ctrl.step(line, 1.0 / self.rate, markers)
             if self.ctrl.decision_no != decision_no:
                 self.get_logger().info(f"마커 판단: {self.ctrl.decision}")
+            if self.ctrl.note_no != note_no:
+                self.get_logger().info(f"정지선: {self.ctrl.note}")
             self.out = out
             self._publish(out.linear, out.angular)
             if out.done:

@@ -172,6 +172,8 @@ class DriveController:
         self.marker_near = False            # 목적지 색 스티커가 보임 → 감속
         self.marker_ignore = 0.0            # 남은 마커 무시 시간
         self.event_ignore = 0.0             # 남은 라인 이벤트 무시 시간 (회전 직후)
+        self.note, self.note_no = "", 0     # 정지선 처리 기록 (drive_node가 로그로 — 지나친 이유 찾기)
+        self._noted = ""                    # 같은 무시 이유를 반복해서 남기지 않게
         self.check_t = None                 # 스티커 앞에 멈춰 좌우를 확인한 시간 (None = 확인 중 아님)
         self.check_counts = [0, 0, 0]       # 본 프레임 수, 왼쪽에 보인 수, 오른쪽에 보인 수
         self.branch_counts = [0, 0, 0]      # 확인 중 라인 프레임 수, 왼쪽 갈래 보인 수, 오른쪽 갈래 보인 수
@@ -312,6 +314,7 @@ class DriveController:
         if line is None:                       # 이번 주기엔 새 영상 없음 → 직전 출력 유지
             return self.last
         line = self._pass_stop_line(line)
+        self._note_ignored(line)
         if self.event_ignore <= 0.0:
             if line.event == LineEvent.LINE_END and self.cfg.recheck_tries > 0:
                 self.recheck_t, self.recheck_seen = 0.0, 0     # 멈춰서 다시 봄 — 주행 중 흔들림으로 놓쳤을 수 있음
@@ -322,6 +325,7 @@ class DriveController:
                 return DriveOutput(0.0, 0.0, True, line.event.value)
             if line.raw_event in VERIFY_EVENTS and self.cooldown <= 0.0:
                 self.verify_t, self.verify_clear, self.verify_event = 0.0, 0, line.raw_event   # 일단 멈추고 확인
+                self._note(f"{line.raw_event.value} 보임 → 멈추고 확인")
                 self.last = DriveOutput(0.0, 0.0)
                 return self.last
 
@@ -333,6 +337,23 @@ class DriveController:
             linear = min(linear, c.event_speed)          # 이벤트나 목적지 마커가 보이기 시작하면 감속
         self.last = DriveOutput(round(linear, 3), angular)
         return self.last
+
+    def _note(self, text: str) -> None:
+        self.note, self.note_no = text, self.note_no + 1
+
+    def _note_ignored(self, line: LineInput) -> None:
+        """정지선이 보였는데 멈추지 않는 이유를 한 번씩 기록 (회전 직후 무시, 오판정 뒤 쉬는 시간)."""
+        if LineEvent.STOP_LINE not in (line.event, line.raw_event):
+            self._noted = ""
+            return
+        why = ""
+        if self.event_ignore > 0.0:
+            why = f"회전 직후 무시 중 (남은 {self.event_ignore:.1f}초)"
+        elif self.cooldown > 0.0:
+            why = f"오판정 뒤 쉬는 중 (남은 {self.cooldown:.1f}초)"
+        if why and why.split(" (")[0] != self._noted:
+            self._noted = why.split(" (")[0]
+            self._note(f"정지선 보였지만 멈추지 않음 — {why}")
 
     def _pass_stop_line(self, line: LineInput) -> LineInput:
         """통과할 정지선이 남아 있으면 정지선 판정을 지우고 지나간다. 판정이 연속으로 사라지면 하나 지난 것."""
@@ -346,6 +367,7 @@ class DriveController:
             if self.pass_clear >= self.cfg.pass_clear_frames:
                 self.skip_stop -= 1
                 self.passing = False
+                self._note(f"정지선 하나 통과 (지시대로, 남은 통과 {self.skip_stop})")
         if not seen:
             return line
         drop = lambda e: LineEvent.NONE if e == LineEvent.STOP_LINE else e   # noqa: E731
@@ -388,11 +410,15 @@ class DriveController:
         self.verify_t += dt
         if line is not None:
             if line.event in VERIFY_EVENTS:
+                self._note(f"{line.event.value} 확정 ({self.verify_t:.1f}초)")
                 self.verify_t = None
                 self.command = None
                 return DriveOutput(0.0, 0.0, True, line.event.value)
             self.verify_clear = 0 if line.raw_event in VERIFY_EVENTS else self.verify_clear + 1
         if self.verify_clear >= c.verify_clear_frames or self.verify_t >= c.verify_timeout_s:
+            why = (f"판정 {c.verify_clear_frames}장 연속 사라짐" if self.verify_clear >= c.verify_clear_frames
+                   else f"{c.verify_timeout_s:g}초 동안 확정 안 됨")
+            self._note(f"{self.verify_event.value} 확인 실패 — {why} → 오판정으로 보고 다시 출발")
             self.verify_t = None
             self.cooldown = c.verify_cooldown_s
             self.pid.reset()

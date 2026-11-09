@@ -10,6 +10,7 @@ standalone=True : mission_node가 없는 단위 개발 단계. 상태(IDLE·MANU
 standalone=False: SETUP·START·STOP·RESUME·MANUAL·MOVE는 mission_node로 넘기고 상태·매핑은 /mission/status를 따른다.
   START는 매핑 4개가 없으면 여기서 거부(NAK). mission_node가 없으면 상태가 바뀌지 않으므로 standalone으로 쓴다.
   DEV DRIVE ARRIVE(도착 시험)는 mission_node TEST_ARRIVE로, DEV DRIVE STOP은 주행 정지 + mission_node CANCEL (2026-11-06).
+  DEV RESET(시험 초기화)은 주행 정지 + mission_node RESET — 어느 상태에서든 IDLE (2026-11-09).
 """
 from agv_protocol.messages import (
     WATCH_KEYS, Command, check_allowed, command_key, format_ack, format_dev, format_error, format_event,
@@ -150,6 +151,15 @@ class BridgeCore:
             self.io.drive(rest[0])
             if rest[0] == "STOP" and not self.standalone:
                 self.io.mission(Command("CANCEL"))          # 도착 시험·초기 설정·작업 중이었으면 mission도 멈춤
+        elif sub == "RESET":                                # 시험 초기화 — 주행 정지 + mission_node RESET (2026-11-09)
+            self.io.drive("STOP")
+            if self.standalone:
+                self.io.estop(False)
+                self.link_lost = False
+                self._set_state("IDLE")
+                self.io.send(format_event("RESET"))
+            else:
+                self.io.mission(Command("RESET"))
         elif sub == "TUNE":
             self.io.tune(rest[0], float(rest[1]))
         elif sub == "TARGET":

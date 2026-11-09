@@ -251,3 +251,21 @@ def test_dev_cal_sign_tilt_goes_to_pantilt(core):
     c.on_calibration("SIGN 165")
     r = io.replies("DEV")[-1]
     assert r["kind"] == "CAL" and r["state"] == "SIGN" and r["detail"] == "165"
+
+
+def test_dev_reset_goes_to_mission_in_any_state():
+    """시험 초기화 (2026-11-09) — 주행 정지 + mission_node RESET, 비상 정지 중에도."""
+    io = FakeIO()
+    c = BridgeCore(io, standalone=False)
+    c.on_mission_status("ESTOP", "SETUP", 0, 4, "NONE", 0, "red", {})
+    c.on_line("DEV RESET")
+    assert io.replies("ACK")[-1]["command"] == "DEV RESET"
+    assert ("drive", "STOP") in io.calls and [a[1].kind for a in io.calls if a[0] == "mission"] == ["RESET"]
+
+
+def test_dev_reset_standalone_goes_idle(core):
+    c, io = core
+    c.on_line("STOP")
+    c.on_line("DEV RESET")
+    assert c.state == "IDLE" and ("estop", False) in io.calls
+    assert io.replies("EVENT")[-1]["event"] == "RESET"

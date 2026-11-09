@@ -271,7 +271,11 @@ class DevTab(ttk.Frame):
                   command=self._start_uturn).pack(side="left")
         tk.Button(run, text="⚑ 도착 시험", bg="#6a1b9a", fg="white", font=("맑은 고딕", 10, "bold"), width=10,
                   command=self._start_arrive).pack(side="left", padx=(4, 0))
-        self.drive_lbl = ttk.Label(run, text="대기", width=18)
+        tk.Button(run, text="⚙ 초기 설정 시험", bg="#00838f", fg="white", font=("맑은 고딕", 10, "bold"), width=13,
+                  command=self._start_setup).pack(side="left", padx=(4, 0))
+        tk.Button(run, text="⟲ 초기화", bg="#c62828", fg="white", font=("맑은 고딕", 10, "bold"), width=8,
+                  command=self._reset_test).pack(side="left", padx=(4, 0))
+        self.drive_lbl = ttk.Label(run, text="대기", width=24)
         self.drive_lbl.pack(side="left", padx=4)
         self.speed = tk.DoubleVar(value=self.tuning["speed"])
         self.turn = tk.DoubleVar(value=self.tuning["turn"])
@@ -387,16 +391,57 @@ class DevTab(ttk.Frame):
         self.drive_lbl.config(text="도착 시험 준비…", foreground="#f57c00")
         self._schedule_drive("ARRIVE")
 
+    def _start_setup(self):
+        """초기 설정 시험 (agv.launch.py 필요) — 사용자 탭 "초기 설정"과 같은 SETUP. 대기장소에서 빨강→파랑→초록 지점의
+        표지판을 읽고 넷째는 소거법, 대기장소로 돌아와 MAP_DONE. 중간에 멈추려면 ⟲ 초기화 (차를 대기장소에 다시 놓고 재시작)."""
+        self._cancel_scheduled()
+        if self.send("SETUP"):
+            self.drive_lbl.config(text="초기 설정 시작 요청…", foreground="#f57c00")
+
+    def _reset_test(self):
+        """⟲ 초기화 — 어느 상태에서든 주행을 멈추고 비상 정지 해제, 카메라 내림, IDLE (DEV RESET).
+        초기 설정 중간이면 반쯤 된 매핑도 지움 (4곳 다 된 매핑은 유지)."""
+        self._cancel_scheduled()
+        if self.send("DEV", "RESET"):
+            self.drive_lbl.config(text="초기화 요청…", foreground="#f57c00")
+
     ARRIVE_STATES = {"NAVIGATE": "도착 시험: 정지선까지 주행", "APPROACH": "도착 시험: 표지판 쪽으로 접근",
                      "CHECK_SIGN": "도착 시험: 표지판 확인"}
+    SETUP_STATES = {"NAVIGATE": "초기 설정: 주행", "UTURN": "초기 설정: 유턴", "APPROACH": "초기 설정: 표지판 접근",
+                    "CHECK_SIGN": "초기 설정: 표지판 확인", "PAUSED_OBSTACLE": "초기 설정: 장애물 대기"}
 
     def show_arrive_state(self, state: str):
-        """도착 시험 중 mission_node 상태를 주행 표시줄에 (STATUS)."""
+        """도착 시험·초기 설정 시험 중 mission_node 상태를 주행 표시줄에 (STATUS)."""
         if getattr(self, "arriving", False) and state in self.ARRIVE_STATES:
             self.drive_lbl.config(text=self.ARRIVE_STATES[state], foreground="#6a1b9a")
+        elif getattr(self, "setting_up", False) and state in self.SETUP_STATES:
+            text = self.SETUP_STATES[state] + (f" ({self.setup_step})" if getattr(self, "setup_step", "") else "")
+            self.drive_lbl.config(text=text[:30], foreground="#00838f")
 
     def show_arrive_event(self, event: str, detail: str):
-        """도착 시험 시작·결과·취소·오류 (EVENT ARRIVE_TEST / ARRIVED / CANCELLED, ERROR)."""
+        """도착 시험·초기 설정 시험 시작·진행·결과 (EVENT ARRIVE_TEST / ARRIVED / SETUP_STARTED / MAPPED / MAP_DONE /
+        CANCELLED / RESET, ERROR)."""
+        if event == "RESET":
+            self.arriving = self.setting_up = False
+            text = "초기화됨" + (f" — {detail}" if detail else "")
+            self.drive_lbl.config(text=text, foreground="black")
+            self.log("SYS", text)
+            return
+        if event == "SETUP_STARTED":
+            self.setting_up, self.setup_step = True, "빨강부터"
+            self.drive_lbl.config(text="초기 설정: 시작", foreground="#00838f")
+            self.log("SYS", "초기 설정 시험 시작")
+            return
+        if getattr(self, "setting_up", False):
+            if event == "MAPPED":
+                self.setup_step = detail
+                self.log("SYS", f"초기 설정 매핑 {detail}")
+            elif event in ("MAP_DONE", "CANCELLED", "ERROR"):
+                self.setting_up = False
+                text = {"MAP_DONE": "초기 설정 완료", "CANCELLED": "초기 설정 취소"}.get(event, f"초기 설정 오류: {detail}")
+                self.drive_lbl.config(text=text[:30], foreground="#d32f2f" if event == "ERROR" else "black")
+                self.log("SYS", text)
+            return
         if event == "ARRIVE_TEST":
             self.arriving = True
             return

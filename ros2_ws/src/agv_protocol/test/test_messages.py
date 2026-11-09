@@ -198,3 +198,10 @@ def test_parse_dev_cal_reply():
     r = parse_reply("DEV CAL RUNNING 66.5 87.2")
     assert r == {"type": "DEV", "kind": "CAL", "state": "RUNNING", "detail": "66.5 87.2"}
     assert parse_reply("DEV CAL DONE 66.0")["detail"] == "66.0"
+
+
+def test_dev_reset_parses_and_is_allowed_everywhere():
+    cmd = parse_command("dev reset")
+    assert cmd.key == "DEV RESET" and check_allowed(cmd, "ESTOP") is None and check_allowed(cmd, "NAVIGATE") is None
+    with pytest.raises(ValueError):
+        parse_command("DEV RESET ALL")

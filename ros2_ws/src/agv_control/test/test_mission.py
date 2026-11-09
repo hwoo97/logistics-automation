@@ -644,3 +644,36 @@ def test_resume_in_arrive_test_keeps_app_color():
     m.handle(Event("STOP"))
     acts = m.handle(Event("RESUME"))
     assert not any(a.kind == "TARGET" for a in acts)
+
+
+# ── 시험 초기화 (개발자 탭 "초기화", DEV RESET — 2026-11-09) ──
+
+def test_reset_mid_setup_clears_partial_map_and_goes_idle():
+    m = MissionStateMachine()
+    m.handle(Event("SETUP"))
+    m.ctx.track_map = {"DROP_A": "red"}                       # 빨강 하나 읽은 뒤
+    m.state = State.NAVIGATE
+    acts = m.handle(Event("RESET"))
+    assert m.state == State.IDLE and m.ctx.mode.value == "NONE" and m.ctx.track_map == {}
+    k = [a.kind for a in acts]
+    assert k[0] == "CANCEL_DRIVE" and "SAVE_MAP" in k and ("ESTOP" in k)
+    assert [a.data for a in acts if a.kind == "TARGET"] == [{"color": "NONE"}]
+    assert acts[-1].data == {"event": "RESET", "detail": "매핑 지움"}
+    assert m.handle(Event("SETUP"))                           # 바로 다시 시작 가능
+
+
+def test_reset_keeps_complete_map():
+    m = MissionStateMachine(track_map=FULL)
+    m.state = State.NAVIGATE
+    acts = m.handle(Event("RESET"))
+    assert m.state == State.IDLE and m.ctx.track_map == FULL
+    assert "SAVE_MAP" not in [a.kind for a in acts] and acts[-1].data == {"event": "RESET", "detail": ""}
+
+
+@pytest.mark.parametrize("state", [State.ESTOP, State.ERROR, State.PARKED, State.MANUAL, State.PAUSED_OBSTACLE])
+def test_reset_from_any_state_releases_estop(state):
+    m = MissionStateMachine(track_map=FULL)
+    m.state = state
+    acts = m.handle(Event("RESET"))
+    assert m.state == State.IDLE
+    assert [a.data for a in acts if a.kind == "ESTOP"] == [{"on": False}]

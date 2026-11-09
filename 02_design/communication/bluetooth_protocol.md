@@ -67,6 +67,7 @@
 | `DEV SPEED <v>` | `DEV SPEED 0.7` | 라인 주행 기본 속도 (0.2~1.0) — drive_node에 바로 적용, 주행 중에도 | `/drive/speed` | 모든 상태 |
 | `DEV WATCH <RANGE\|LINE\|SYS\|ALL> <ON\|OFF>` | `DEV WATCH RANGE ON` | 측정값 보내기 켜기/끄기 (연결 끊기면 모두 꺼짐) | — | 모든 상태 |
 | `DEV NODES` | `DEV NODES` | 실행 중인 ROS 노드 목록 요청 | — | 모든 상태 |
+| `DEV RESET` | `DEV RESET` | **시험 초기화** (2026-11-09) — 어느 상태에서든 주행 정지, 비상 정지 해제, 카메라 LINE, 목적지 색 NONE, LED·7세그먼트 끔, IDLE. mission 연동이면 mission_node `RESET` → `EVENT RESET [매핑 지움]`(초기 설정 중간처럼 매핑이 4곳 미만이면 지움, 다 된 매핑은 유지). standalone이면 브리지가 IDLE로 → `EVENT RESET`. 앱 개발자 탭 "⟲ 초기화" | `/mission/command` | 모든 상태 |
 | `DEV CAL <AUTO\|RESET\|SIGN 틸트>` | `DEV CAL SIGN 160` | 카메라 팬 정면 자동 맞춤(곧은 라인 위에서, line_node 필요) / 저장값(정면·SIGN 틸트) 지우기 / SIGN 자세 틸트 저장(0~180, 2026-11-06). 결과는 `DEV CAL …` | `/pantilt/calibrate` | IDLE |
 
 **Pi → 노트북** (켠 항목만, 5Hz 이하)

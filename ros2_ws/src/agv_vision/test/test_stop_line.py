@@ -201,3 +201,29 @@ def test_gap_in_tape_is_tolerated():
 
 def test_no_line_nearby_returns_false():
     assert not run(floor()).detected
+
+
+def test_reason_empty_when_detected():
+    r = run(scene())
+    assert r.detected and r.reason == "" and not r.candidate
+
+
+def test_reason_for_one_sided_mark():
+    """진단 로그 — 놓칠 뻔한 장면은 후보로 표시하고 탈락 이유를 남김."""
+    img = floor()
+    vline(img)
+    hline(img, 160, 250)
+    r = run(img)
+    assert not r.detected and r.candidate and "왼쪽" in r.reason
+
+
+def test_reason_for_too_wide():
+    r = run(scene(30, 290))
+    assert not r.detected and r.candidate and r.reason.startswith("폭")
+
+
+def test_plain_line_is_not_candidate():
+    img = floor()
+    vline(img)
+    r = run(img)
+    assert not r.detected and not r.candidate

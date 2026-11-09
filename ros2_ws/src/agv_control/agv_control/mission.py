@@ -133,6 +133,8 @@ class MissionStateMachine:
             return self._test_arrive()
         if k == "CANCEL":
             return self._cancel()
+        if k == "RESET":
+            return self._reset_all()
         if k == "START" and self.state == State.IDLE:
             return self._start(int(ev.data.get("circle", 0)), int(ev.data.get("square", 0)))
         if k == "PHASE":
@@ -175,6 +177,21 @@ class MissionStateMachine:
         self._reset()
         return [A("CANCEL_DRIVE"), A("POSE", pose=Pose.LINE.value), A("LED", state=LedState.OFF.value),
                 A("DIGIT", char="0"), A("REPORT", event="CANCELLED")]
+
+    def _reset_all(self) -> list[Action]:
+        """시험 초기화 (개발자 탭 "초기화", DEV RESET — 2026-11-09). 어느 상태에서든 주행을 멈추고 비상 정지를 풀고
+        카메라를 내린 뒤 IDLE. 매핑이 4곳 다 안 됐으면(초기 설정 중간) 지운다 — 다 된 매핑은 남겨 작업 시험에 씀."""
+        c = self.ctx
+        self._reset()
+        self.state = State.IDLE
+        acts = [A("CANCEL_DRIVE"), A("ESTOP", on=False), A("CMD_VEL", linear=0.0, angular=0.0),
+                A("POSE", pose=Pose.LINE.value), A("TARGET", color="NONE"),
+                A("LED", state=LedState.OFF.value), A("DIGIT", char="0")]
+        cleared = bool(c.track_map) and not self.mapped
+        if cleared:
+            c.track_map = {}
+            acts.append(A("SAVE_MAP", track_map={}))
+        return acts + [A("REPORT", event="RESET", detail="매핑 지움" if cleared else "")]
 
     def _start(self, circle: int, square: int) -> list[Action]:
         if not self.mapped:

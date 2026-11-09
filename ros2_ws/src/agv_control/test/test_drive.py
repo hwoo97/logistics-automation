@@ -1145,3 +1145,28 @@ def test_obstacle_count_resets_on_new_start():
     d.cancel()
     d.start(DriveCommand.FOLLOW_TO_EVENT)
     assert not ranges(d, [0.1]).done
+
+
+def test_notes_verify_start_and_confirm():
+    """정지선 처리 기록 (drive_node 로그) — 멈추고 확인, 확정."""
+    d = follow()
+    d.step(RAW_STOP, DT)
+    assert "멈추고 확인" in d.note and d.note_no == 1
+    d.step(CONFIRMED_STOP, DT)
+    assert "확정" in d.note and d.note_no == 2
+
+
+def test_notes_verify_failure():
+    d = follow()
+    d.step(RAW_STOP, DT)
+    for _ in range(5):
+        d.step(CLEAR, DT)
+    assert "확인 실패" in d.note and "사라짐" in d.note
+
+
+def test_notes_stop_line_ignored_after_turn_once():
+    d = finished_turn()
+    stop = LineInput(0.0, True, LineEvent.STOP_LINE, LineEvent.STOP_LINE)
+    d.step(stop, DT)
+    d.step(stop, DT)
+    assert "회전 직후" in d.note and d.note_no == 1

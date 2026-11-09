@@ -48,6 +48,8 @@ class StopLineResult:
     detected: bool          # 이번 프레임 판정
     confirmed: bool         # confirm_frames 쌓여 확정
     angle: float = 0.0      # 정지선 기울기(도), 0 = 수평, + = 오른쪽이 위
+    reason: str = ""        # 판정 안 됐을 때 이유 (진단 로그용)
+    candidate: bool = False # 정지선 같은 두꺼운 가로 열이 라인 굵기 이상 보였는데 탈락 = 놓칠 뻔한 장면
 
 
 def _longest_run(col: np.ndarray) -> tuple[int, int] | None:
@@ -61,6 +63,7 @@ class StopLineDetector:
         self.cfg = cfg or StopLineConfig()
         self.confirm = EventConfirmer(self.cfg.confirm_frames, tolerant={LineEvent.STOP_LINE})
         self.hold = 0                                 # 남은 "아래로 나가도 인정" 프레임
+        self.reason, self.candidate = "", False       # 마지막 _find의 탈락 이유·후보 여부
 
     def set_frames(self, frames: int) -> None:
         """노트북 앱 "확인 프레임" (DEV TUNE CONFIRM)."""
@@ -75,7 +78,8 @@ class StopLineDetector:
         self.hold = c.hold_frames if found else max(0, self.hold - 1)
         event = LineEvent.STOP_LINE if found else LineEvent.NONE
         confirmed = self.confirm.push(event) == LineEvent.STOP_LINE
-        return StopLineResult(found, confirmed, round(angle, 1))
+        return StopLineResult(found, confirmed, round(angle, 1),
+                              "" if found else self.reason, (not found) and self.candidate)
 
     def _line_px(self, mask: np.ndarray, line_x: float) -> float:
         """줄마다 라인 위치에 가장 가까운 가는 구간 폭의 중앙값 (정지선이 가까운 띠를 가려도 되게 관심 영역 전체)."""
@@ -92,12 +96,14 @@ class StopLineDetector:
     def _find(self, mask: np.ndarray, line_x: float, holding: bool = False) -> tuple[bool, float]:
         c = self.cfg
         h, w = mask.shape
+        self.reason, self.candidate = "", False
         line_px = self._line_px(mask, line_x)
         # 라인과 이어진 덩어리 — 라인 위치 근처 픽셀이 가장 많은 것
         _, labels = cv2.connectedComponents(mask, connectivity=8)
         band = labels[:, max(0, int(line_x - line_px)): int(line_x + line_px) + 1]
         ids, counts = np.unique(band[band > 0], return_counts=True)
         if len(ids) == 0:
+            self.reason = "라인 위치에 검정 없음"
             return False, 0.0
         comp = labels == ids[np.argmax(counts)]
 
@@ -114,8 +120,11 @@ class StopLineDetector:
             elif thick >= need:
                 centers[x] = (run[0] + run[1]) / 2
 
+        n_cols = int(np.count_nonzero(~np.isnan(centers)))
+        self.candidate = n_cols >= line_px
         blocks = _spans(touch)
         if not blocks and not holding:
+            self.reason = f"라인(위·아래 닿는 열) 없음, 정지선 열 {n_cols}"
             return False, 0.0
         if not blocks:                                # 라인이 정지선에서 끝나고 아래로 나가는 중 — 오프셋 위치를 라인으로
             blocks = [(int(line_x - line_px / 2), int(line_x + line_px / 2))]
@@ -129,19 +138,27 @@ class StopLineDetector:
         left = self._extent(centers, line_l - 1, -1, line_px)
         right = self._extent(centers, line_r + 1, 1, line_px)
         if left is None or right is None:
+            self.reason = (f"정지선 열이 {'왼쪽' if left is None else ''}{'·' if left is None and right is None else ''}"
+                           f"{'오른쪽' if right is None else ''}에 없음 (라인 {line_l}~{line_r}, 굵기 {line_px:.0f}, 열 {n_cols})")
             return False, 0.0
         side = c.side_min_ratio * line_px
         if line_l - left < side or right - line_r < side:
+            self.reason = f"한쪽이 짧음 (왼 {line_l - left}px, 오른 {right - line_r}px, 기준 {side:.0f}px)"
             return False, 0.0
         lo, hi = c.width_ratio
         if not lo * line_px <= right - left + 1 <= hi * line_px:
+            self.reason = (f"폭 {right - left + 1}px = 라인 굵기 {line_px:.0f}px × {(right - left + 1) / line_px:.1f}"
+                           f" (허용 {lo:g}~{hi:g})")
             return False, 0.0
         edge = max(1, int(w * c.edge_ratio))
         if left < edge and right >= w - edge:         # 양끝까지 = T자 → 마커 인식
+            self.reason = "화면 양끝까지 (T자로 봄)"
             return False, 0.0
         xs = np.nonzero(~np.isnan(centers[left: right + 1]))[0] + left
         slope = np.polyfit(xs, centers[xs], 1)[0]     # 세로 중심 = slope·x + b (y는 아래로 증가)
         angle = float(np.degrees(np.arctan(-slope)))
+        if abs(angle) > c.max_tilt_deg:
+            self.reason = f"기울기 {angle:.0f}° (허용 ±{c.max_tilt_deg:g}°)"
         return abs(angle) <= c.max_tilt_deg, angle
 
     def _extent(self, centers: np.ndarray, start: int, step: int, line_px: float) -> int | None:

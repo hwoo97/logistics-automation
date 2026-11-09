@@ -37,6 +37,7 @@ ALLOWED_STATES = {
     "DEV WATCH": ALL_STATES,
     "DEV NODES": ALL_STATES,
     "DEV CAL": frozenset({"IDLE"}),       # 카메라 팬 정면 자동 맞춤 — 차가 서 있을 때만
+    "DEV RESET": ALL_STATES,              # 시험 초기화 — 어느 상태에서든 멈추고 IDLE (2026-11-09)
 }
 
 WATCH_KEYS = ("RANGE", "LINE", "MARKER", "SYS")
@@ -129,9 +130,9 @@ def _validate_dev(cmd: Command) -> None:
     elif sub == "WATCH":
         if len(rest) != 2 or rest[0] not in (*WATCH_KEYS, "ALL") or rest[1] not in ("ON", "OFF"):
             raise ValueError(f"DEV WATCH: <{'|'.join(WATCH_KEYS)}|ALL> <ON|OFF>")
-    elif sub == "NODES":
+    elif sub in ("NODES", "RESET"):
         if rest:
-            raise ValueError("DEV NODES: 인자 없음")
+            raise ValueError(f"DEV {sub}: 인자 없음")
     elif sub == "CAL":
         act = rest[0].upper() if rest else ""
         if act == "SIGN":                       # DEV CAL SIGN <틸트 0~180> — 표지판 볼 때 틸트를 Pi에 저장

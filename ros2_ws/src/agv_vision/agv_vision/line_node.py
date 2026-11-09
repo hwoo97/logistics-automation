@@ -1,6 +1,9 @@
 """line_node — /camera/image_raw(최신 1장) → LineDetector → /line/state, StopLineDetector → /stop_line/state (F4).
 영상 노드를 줄이려고 정지선 판정도 여기서 같은 프레임으로 한다 (2026-11-02). 파라미터 enabled로 끄고 켬.
 /line/tune(String "CONFIRM 3"·"LINE_END 10", 노트북 앱 DEV TUNE)으로 확정 프레임 수를 실행 중에 바꾼다."""
+import time
+from collections import Counter
+
 import cv2
 import rclpy
 from rclpy.node import Node
@@ -75,7 +78,31 @@ class LineNode(Node):
                                  qos_profile_sensor_data)
         self.create_subscription(String, "/line/tune", self.on_tune, 10)
         self.add_on_set_parameters_callback(self.on_params)
+        self.diag = p("stop_diag", True).value          # 정지선 진단 로그 (1초 요약 — 판정·놓칠 뻔한 장면이 있을 때만)
+        self._diag_reset(time.monotonic())
         self.get_logger().info(f"line_node 시작 (enabled={self.enabled}, roi={cfg.roi_ratio})")
+
+    def _diag_reset(self, now: float):
+        self.diag_t, self.diag_frames, self.diag_det, self.diag_conf = now, 0, 0, 0
+        self.diag_reasons = Counter()
+
+    def _diag(self, s):
+        """정지선 진단 — 1초마다 영상 수(=처리 속도), 판정·확정 수, 놓칠 뻔한 장면의 탈락 이유를 한 줄로."""
+        now = time.monotonic()
+        self.diag_frames += 1
+        self.diag_det += s.detected
+        self.diag_conf += s.confirmed
+        if s.candidate:
+            self.diag_reasons[s.reason.split(" (")[0]] += 1
+            self.diag_last = s.reason
+        if now - self.diag_t < 1.0:
+            return
+        if self.diag_det or self.diag_reasons:
+            why = ", ".join(f"{k} {n}" for k, n in self.diag_reasons.most_common(3))
+            self.get_logger().info(
+                f"정지선 진단: 영상 {self.diag_frames}장/{now - self.diag_t:.1f}초, 판정 {self.diag_det}, 확정 {self.diag_conf}"
+                + (f", 탈락 [{why}] 예: {self.diag_last}" if why else ""))
+        self._diag_reset(now)
 
     def on_params(self, params):
         from rcl_interfaces.msg import SetParametersResult
@@ -111,6 +138,8 @@ class LineNode(Node):
             self.offset = float(r.offset)
         s = self.stop_line.process(small, self.offset)
         self.pub_stop.publish(StopLineState(detected=s.detected, confirmed=s.confirmed, angle=float(s.angle)))
+        if self.diag:
+            self._diag(s)
         self.pub.publish(LineState(offset=float(r.offset), line_found=r.line_found,
                                    event=r.event.value, raw_event=r.raw_event.value,
                                    angle=float(r.angle), angle_valid=r.angle_valid,
